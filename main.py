@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.03
-功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序
+精简版多标签记事本 - 安卓版 (Kivy) V1.10
+功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
 - 每5秒自动保存到本地 + FTP
+- 长按标签删除（0.8秒）
+- 横竖屏自适应
 """
 
 import os
@@ -266,9 +268,9 @@ class DarkButton(Button):
         self.background_normal = ''
         self.background_color = COLORS['button']
         self.color = COLORS['text']
-        self.font_size = dp(14)
+        self.font_size = dp(11)
         self.size_hint_y = None
-        self.height = dp(40)
+        self.height = dp(20)
         if available_font:
             self.font_name = 'Chinese'
 
@@ -279,13 +281,17 @@ class TabButton(Button):
         self.title = title
         self.index = index
         self.background_normal = ''
-        self.font_size = dp(13)
+        self.font_size = dp(11)
         self.size_hint_x = None
-        self.width = dp(110)
+        self.width = dp(90)
         self.size_hint_y = 1
         self.dragging = False
         self.drag_start = None
-        self.is_dragging = False  # 新增：标记是否真正在拖拽
+        self.is_dragging = False
+        # 长按相关
+        self.long_press_event = None
+        self.long_press_triggered = False
+        self.long_press_delay = 0.8  # 长按阈值（秒）
         if available_font:
             self.font_name = 'Chinese'
         self.set_active(active)
@@ -311,8 +317,11 @@ class TabButton(Button):
             return super().on_touch_down(touch)
         self.dragging = True
         self.drag_start = touch.pos
-        self.is_dragging = False  # 重置拖拽标记
-        super().on_touch_down(touch)  # ← FIX1: 启用 Button grab，否则 on_release 不触发
+        self.is_dragging = False
+        self.long_press_triggered = False
+        # 启动长按定时器
+        self.long_press_event = Clock.schedule_once(self._on_long_press, self.long_press_delay)
+        super().on_touch_down(touch)
         return True
 
     def on_touch_move(self, touch):
@@ -320,43 +329,61 @@ class TabButton(Button):
             return super().on_touch_move(touch)
         dx = touch.pos[0] - self.drag_start[0]
         dy = touch.pos[1] - self.drag_start[1]
-        # 只有移动超过阈值才认为是拖拽
         if abs(dx) > dp(15) or abs(dy) > dp(15):
-            self.is_dragging = True  # 标记为正在拖拽
+            # 移动时取消长按
+            if self.long_press_event:
+                self.long_press_event.cancel()
+                self.long_press_event = None
+            self.is_dragging = True
             parent = self.parent
             while parent and not hasattr(parent, 'start_drag'):
                 parent = parent.parent
             if parent and hasattr(parent, 'start_drag'):
-                # ← FIX2a: Kivy grab 机制导致 MainLayout.on_touch_move 收不到事件
-                # 直接在 TabButton 中驱动拖拽逻辑
                 if not getattr(self, '_drag_started', False):
                     parent.start_drag(self, touch)
                     self._drag_started = True
                 if hasattr(parent, 'update_drag'):
                     parent.update_drag(self, touch)
         return True
+
     def on_touch_up(self, touch):
+        # 取消长按定时器
+        if self.long_press_event:
+            self.long_press_event.cancel()
+            self.long_press_event = None
+        
         if self.dragging:
             self.dragging = False
             self.drag_start = None
             
             if self.is_dragging:
-                # 拖拽结束
                 self.is_dragging = False
-                self._drag_started = False  # ← FIX2b: 重置拖拽标记
+                self._drag_started = False
                 parent = self.parent
                 while parent and not hasattr(parent, 'end_drag'):
                     parent = parent.parent
                 if parent and hasattr(parent, 'end_drag'):
                     parent.end_drag(self, touch)
-                return True  # 阻止点击事件
+                return True
             
-            # 普通点击：恢复dragging状态后再调用父类
-            # 让 Kivy 的 Button 基类处理 on_release
+            # 如果长按已触发，不触发点击
+            if self.long_press_triggered:
+                return True
+            
             result = super().on_touch_up(touch)
             return result
         
         return super().on_touch_up(touch)
+
+    def _on_long_press(self, dt):
+        """长按回调：删除标签"""
+        self.long_press_triggered = True
+        # 找到父布局执行删除
+        parent = self.parent
+        while parent and not hasattr(parent, 'close_tab_by_btn'):
+            parent = parent.parent
+        if parent and hasattr(parent, 'close_tab_by_btn'):
+            parent.close_tab_by_btn(self)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -404,7 +431,7 @@ class TransferTab(BoxLayout):
         self.spacing = dp(6)
         self.files = []
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
         for text, cb in [
             ('添加文件', self.add_files),
             ('清空', self.clear_list),
@@ -413,22 +440,24 @@ class TransferTab(BoxLayout):
             ('下载', self.download_files),
         ]:
             btn = DarkButton(text=text)
+            btn.height = dp(28)
+            btn.font_size = dp(10)
             btn.bind(on_press=lambda inst, c=cb: c())
             btn_row.add_widget(btn)
         self.add_widget(btn_row)
 
-        header = BoxLayout(size_hint_y=None, height=dp(30))
-        lbl1 = Label(text='文件名', size_hint_x=0.5, color=COLORS['hint'], font_size=dp(13))
+        header = BoxLayout(size_hint_y=None, height=dp(22))
+        lbl1 = Label(text='文件名', size_hint_x=0.5, color=COLORS['hint'], font_size=dp(10))
         if available_font:
             lbl1.font_name = 'Chinese'
         header.add_widget(lbl1)
         
-        lbl2 = Label(text='大小', size_hint_x=0.2, color=COLORS['hint'], font_size=dp(13))
+        lbl2 = Label(text='大小', size_hint_x=0.2, color=COLORS['hint'], font_size=dp(10))
         if available_font:
             lbl2.font_name = 'Chinese'
         header.add_widget(lbl2)
         
-        lbl3 = Label(text='来源', size_hint_x=0.3, color=COLORS['hint'], font_size=dp(13))
+        lbl3 = Label(text='来源', size_hint_x=0.3, color=COLORS['hint'], font_size=dp(10))
         if available_font:
             lbl3.font_name = 'Chinese'
         header.add_widget(lbl3)
@@ -442,8 +471,8 @@ class TransferTab(BoxLayout):
 
         self.info_label = Label(
             text='总大小: 0 MB / 90 MB  |  共 0 个文件',
-            size_hint_y=None, height=dp(28),
-            color=COLORS['hint'], font_size=dp(13), halign='left',
+            size_hint_y=None, height=dp(20),
+            color=COLORS['hint'], font_size=dp(10), halign='left',
         )
         if available_font:
             self.info_label.font_name = 'Chinese'
@@ -454,23 +483,23 @@ class TransferTab(BoxLayout):
         self.list_layout.clear_widgets()
         for item in self.files:
             path, size, display, is_local = item
-            row = BoxLayout(size_hint_y=None, height=dp(36), padding=[dp(4), 0])
+            row = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0])
             
             lbl1 = Label(
                 text=display[:40] + ('...' if len(display) > 40 else ''),
-                size_hint_x=0.5, color=COLORS['text'], font_size=dp(13),
+                size_hint_x=0.5, color=COLORS['text'], font_size=dp(10),
             )
             if available_font:
                 lbl1.font_name = 'Chinese'
             row.add_widget(lbl1)
             
-            lbl2 = Label(text=format_size(size), size_hint_x=0.2, color=COLORS['text'], font_size=dp(13))
+            lbl2 = Label(text=format_size(size), size_hint_x=0.2, color=COLORS['text'], font_size=dp(10))
             if available_font:
                 lbl2.font_name = 'Chinese'
             row.add_widget(lbl2)
             
             src = '本地' if is_local else '服务器'
-            lbl3 = Label(text=src, size_hint_x=0.3, color=COLORS['hint'], font_size=dp(13))
+            lbl3 = Label(text=src, size_hint_x=0.3, color=COLORS['hint'], font_size=dp(10))
             if available_font:
                 lbl3.font_name = 'Chinese'
             row.add_widget(lbl3)
@@ -496,7 +525,7 @@ class TransferTab(BoxLayout):
             path_input.font_name = 'Chinese'
         content.add_widget(path_input)
 
-        quick = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
+        quick = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4))
         home = os.path.expanduser('~')
         for name, p in [
             ('下载', '/storage/emulated/0/Download'),
@@ -504,14 +533,14 @@ class TransferTab(BoxLayout):
             ('Downloads', os.path.join(home, 'Downloads')),
         ]:
             if os.path.isdir(p):
-                b = DarkButton(text=name, size_hint_x=None, width=dp(100))
+                b = DarkButton(text=name, size_hint_x=None, width=dp(80), height=dp(24), font_size=dp(10))
                 b.bind(on_press=lambda inst, path=p: path_input.insert_text(path + '/\n'))
                 quick.add_widget(b)
         content.add_widget(quick)
 
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        cancel_btn = DarkButton(text='取消')
-        ok_btn = DarkButton(text='添加')
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        cancel_btn = DarkButton(text='取消', height=dp(28), font_size=dp(11))
+        ok_btn = DarkButton(text='添加', height=dp(28), font_size=dp(11))
         btn_row.add_widget(cancel_btn)
         btn_row.add_widget(ok_btn)
         content.add_widget(btn_row)
@@ -638,8 +667,8 @@ class MainLayout(BoxLayout):
         self.drag_tab_index = -1
         self.drag_over_index = -1
 
-        # 标题栏
-        title_bar = BoxLayout(size_hint_y=None, height=dp(42), padding=[dp(6), 0], spacing=dp(4))
+        # 标题栏 - 最小高度
+        title_bar = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0], spacing=dp(4))
         with title_bar.canvas.before:
             Color(*COLORS['tab_bar'])
             self._title_bg = Rectangle(pos=title_bar.pos, size=title_bar.size)
@@ -648,12 +677,12 @@ class MainLayout(BoxLayout):
             size=lambda *a: setattr(self._title_bg, 'size', title_bar.size),
         )
         for text, cb in [('文件', self.show_file_menu), ('设置', self.show_settings)]:
-            b = DarkButton(text=text, size_hint_x=None, width=dp(60), height=dp(36))
+            b = DarkButton(text=text, size_hint_x=None, width=dp(50), height=dp(20), font_size=dp(11))
             b.bind(on_press=lambda inst, c=cb: c())
             title_bar.add_widget(b)
         self.user_label = Label(
             text='未设置用户名', color=(0.43, 0.61, 0.73, 1),
-            font_size=dp(13), size_hint_x=1, halign='right',
+            font_size=dp(10), size_hint_x=1, halign='right',
         )
         if available_font:
             self.user_label.font_name = 'Chinese'
@@ -661,8 +690,8 @@ class MainLayout(BoxLayout):
         title_bar.add_widget(self.user_label)
         self.add_widget(title_bar)
 
-        # 标签栏
-        self.tab_bar = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(2), padding=[dp(2), 0])
+        # 标签栏 - 最小高度
+        self.tab_bar = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(2), padding=[dp(2), 0])
         with self.tab_bar.canvas.before:
             Color(*COLORS['tab_bar'])
             self._tab_bg = Rectangle(pos=self.tab_bar.pos, size=self.tab_bar.size)
@@ -676,8 +705,8 @@ class MainLayout(BoxLayout):
         self.content_area = BoxLayout()
         self.add_widget(self.content_area)
 
-        # 状态栏
-        status = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(10), 0])
+        # 状态栏 - 最小高度
+        status = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
         with status.canvas.before:
             Color(*COLORS['status'])
             self._status_bg = Rectangle(pos=status.pos, size=status.size)
@@ -685,12 +714,12 @@ class MainLayout(BoxLayout):
             pos=lambda *a: setattr(self._status_bg, 'pos', status.pos),
             size=lambda *a: setattr(self._status_bg, 'size', status.size),
         )
-        self.status_left = Label(text='就绪', color=(1, 1, 1, 1), font_size=dp(12),
+        self.status_left = Label(text='就绪', color=(1, 1, 1, 1), font_size=dp(10),
                                  halign='left', size_hint_x=0.55)
         if available_font:
             self.status_left.font_name = 'Chinese'
         self.status_left.bind(size=self.status_left.setter('text_size'))
-        self.status_right = Label(text='', color=(1, 1, 1, 1), font_size=dp(12),
+        self.status_right = Label(text='', color=(1, 1, 1, 1), font_size=dp(10),
                                   halign='right', size_hint_x=0.45)
         if available_font:
             self.status_right.font_name = 'Chinese'
@@ -737,15 +766,12 @@ class MainLayout(BoxLayout):
             if tab['btn']:
                 tab['btn'].set_drag_over(False)
 
-
-    # ← FIX2c: 由 TabButton.on_touch_move 直接调用，绕过 Kivy grab 机制
     def update_drag(self, btn, touch):
         if not self.drag_tab_btn:
             return
         for i, tab in enumerate(self.tabs):
             other_btn = tab['btn']
             if other_btn and other_btn != self.drag_tab_btn:
-                # touch.pos 是 MainLayout 坐标，需转为 tab_bar 本地坐标
                 local_x = touch.pos[0] - self.tab_bar.x
                 local_y = touch.pos[1] - self.tab_bar.y
                 if other_btn.collide_point(local_x, local_y):
@@ -762,6 +788,7 @@ class MainLayout(BoxLayout):
             if old_btn:
                 old_btn.set_drag_over(False)
             self.drag_over_index = -1
+
     def _swap_tabs(self, from_idx, to_idx):
         if from_idx == to_idx:
             return
@@ -786,7 +813,6 @@ class MainLayout(BoxLayout):
                 active=(i == self.current_index),
                 index=i,
             )
-            # 使用 on_release 更准确
             btn.bind(on_release=partial(self._on_tab_press, i))
             tab['btn'] = btn
             temp_tabs.append(btn)
@@ -794,18 +820,14 @@ class MainLayout(BoxLayout):
         for btn in temp_tabs:
             self.tab_bar.add_widget(btn)
         
-        plus = DarkButton(text='+', size_hint_x=None, width=dp(40), height=dp(32))
+        # 只有 + 按钮，没有 - 按钮（长按标签删除）
+        plus = DarkButton(text='+', size_hint_x=None, width=dp(30), height=dp(18), font_size=dp(14))
         plus.bind(on_press=lambda *a: self.add_text_tab())
         self.tab_bar.add_widget(plus)
-        
-        minus = DarkButton(text='-', size_hint_x=None, width=dp(40), height=dp(32))
-        minus.bind(on_press=lambda *a: self.close_current_tab())
-        self.tab_bar.add_widget(minus)
 
     def on_touch_move(self, touch):
-        # ← FIX2d: Kivy grab 机制导致此方法在拖拽时不会被调用
-        # 拖拽逻辑已移至 update_drag()，由 TabButton 直接驱动
         return super().on_touch_move(touch)
+
     def _on_tab_press(self, index, instance):
         if self.drag_tab_btn:
             return
@@ -815,6 +837,13 @@ class MainLayout(BoxLayout):
         if self.current_index < 0 or self.current_index >= len(self.tabs):
             return
         self.close_tab(self.current_index)
+
+    def close_tab_by_btn(self, btn):
+        """通过按钮实例删除标签（长按触发）"""
+        for i, tab in enumerate(self.tabs):
+            if tab['btn'] == btn:
+                self.close_tab(i)
+                break
 
     def show_tab(self, index):
         if index < 0 or index >= len(self.tabs):
@@ -877,9 +906,9 @@ class MainLayout(BoxLayout):
         if available_font:
             ti.font_name = 'Chinese'
         content.add_widget(ti)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        cancel = DarkButton(text='取消')
-        ok = DarkButton(text='确定')
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        cancel = DarkButton(text='取消', height=dp(28), font_size=dp(11))
+        ok = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         btn_row.add_widget(cancel)
         btn_row.add_widget(ok)
         content.add_widget(btn_row)
@@ -915,7 +944,7 @@ class MainLayout(BoxLayout):
         if available_font:
             popup.title_font = 'Chinese'
         for text, cb in items:
-            b = DarkButton(text=text)
+            b = DarkButton(text=text, height=dp(28), font_size=dp(11))
             b.bind(on_press=lambda inst, c=cb, p=popup: (p.dismiss(), c()))
             content.add_widget(b)
         popup.open()
@@ -925,14 +954,14 @@ class MainLayout(BoxLayout):
         items = [
             ('设置用户名', self.app.set_username),
             ('设置FTP密码', self.app.set_ftp_password),
-            ('设置下载目录', self.app.set_download_dir),  # 加回来
+            ('设置下载目录', self.app.set_download_dir),
         ]
         popup = Popup(title='设置', content=content, size_hint=(0.7, 0.45),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
             popup.title_font = 'Chinese'
         for text, cb in items:
-            b = DarkButton(text=text)
+            b = DarkButton(text=text, height=dp(28), font_size=dp(11))
             b.bind(on_press=lambda inst, c=cb, p=popup: (p.dismiss(), c()))
             content.add_widget(b)
         popup.open()
@@ -990,9 +1019,9 @@ class MiniNoteApp(App):
             ti.font_name = 'Chinese'
         content.add_widget(ti)
         
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        cancel = DarkButton(text='取消')
-        ok = DarkButton(text='确定')
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        cancel = DarkButton(text='取消', height=dp(28), font_size=dp(11))
+        ok = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         btn_row.add_widget(cancel)
         btn_row.add_widget(ok)
         content.add_widget(btn_row)
@@ -1017,7 +1046,6 @@ class MiniNoteApp(App):
     def _default_download_dir(self):
         """获取默认下载目录 - 针对Android手机"""
         if platform == 'android':
-            # Android 系统标准下载目录
             android_dirs = [
                 '/storage/emulated/0/Download',
                 '/sdcard/Download',
@@ -1027,15 +1055,13 @@ class MiniNoteApp(App):
             for p in android_dirs:
                 if os.path.exists(p) or os.path.isdir(p):
                     return p
-            # 如果都不存在，返回应用私有目录下的download
             try:
                 private_dir = os.path.join(self.user_data_dir, 'download')
                 os.makedirs(private_dir, exist_ok=True)
                 return private_dir
             except Exception:
-                return '/storage/emulated/0/Download'  # 最后保底
+                return '/storage/emulated/0/Download'
         else:
-            # 非Android（如Windows开发测试）
             return os.path.join(os.path.expanduser('~'), 'Downloads')
 
     def _load_username(self):
@@ -1075,7 +1101,6 @@ class MiniNoteApp(App):
 
     def _save_username_to_file(self):
         """保存用户名到数据文件"""
-        # 在保存数据时，会把用户名写入 data['username']
         pass  # 由 save_data 处理
 
     def check_first_start(self):
@@ -1084,18 +1109,14 @@ class MiniNoteApp(App):
             self.show_message('首次使用，请先设置用户名和FTP密码')
             Clock.schedule_once(lambda dt: self.set_username(), 0.5)
             return
-        
-        # 已有用户名，开始加载
         Clock.schedule_once(lambda dt: self.load_data(), 0.3)
 
     def build(self):
         Window.clearcolor = COLORS['bg']
-        # ← FIX3: 绑定窗口尺寸变化，自动适配横竖屏切换
         Window.bind(on_resize=self._on_resize)
         
         self.main_layout = MainLayout(self)
         self._auto_save_event = Clock.schedule_interval(self._auto_save, AUTO_SAVE_INTERVAL)
-        # 延迟一次方向适配，确保窗口尺寸已就绪
         Clock.schedule_once(lambda dt: self._on_resize(Window, *Window.size), 0.2)
         return self.main_layout
 
@@ -1110,25 +1131,22 @@ class MiniNoteApp(App):
             return
         self.save_data(silent=True, is_auto=True)
 
-
-    # ← FIX3: 屏幕旋转时自动调整布局（横屏/竖屏适配）
     def _on_resize(self, window, width, height):
+        """横竖屏适配 - 调整标签宽度"""
         if width <= 0 or height <= 0 or not self.main_layout:
             return
         is_landscape = width > height
-        # 横屏时增加标签栏高度和标签宽度，提升可用性
         if is_landscape:
-            self.main_layout.tab_bar.height = dp(42)
             for tab in self.main_layout.tabs:
                 btn = tab.get('btn')
                 if btn and isinstance(btn, TabButton):
-                    btn.width = dp(140)
+                    btn.width = dp(120)
         else:
-            self.main_layout.tab_bar.height = dp(36)
             for tab in self.main_layout.tabs:
                 btn = tab.get('btn')
                 if btn and isinstance(btn, TabButton):
-                    btn.width = dp(110)
+                    btn.width = dp(90)
+
     # ── 设置用户名 ──
 
     def set_username(self):
@@ -1149,9 +1167,9 @@ class MiniNoteApp(App):
         if available_font:
             ti.font_name = 'Chinese'
         content.add_widget(ti)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        cancel = DarkButton(text='取消')
-        ok = DarkButton(text='确定')
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        cancel = DarkButton(text='取消', height=dp(28), font_size=dp(11))
+        ok = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         btn_row.add_widget(cancel)
         btn_row.add_widget(ok)
         content.add_widget(btn_row)
@@ -1167,7 +1185,6 @@ class MiniNoteApp(App):
                 self.username = name
                 self.main_layout.user_label.text = name
                 popup.dismiss()
-                # 设置用户名后加载数据
                 self.load_data()
             else:
                 self.show_message('用户名不能为空')
@@ -1188,37 +1205,53 @@ class MiniNoteApp(App):
             lbl.font_name = 'Chinese'
         content.add_widget(lbl)
         
+        current_password = load_password()
+        
         ti = TextInput(
-            text='', multiline=False, font_size=dp(16),
+            text=current_password,
+            multiline=False, font_size=dp(16),
             background_color=(0.2, 0.2, 0.22, 1), foreground_color=COLORS['text'],
-            hint_text='输入FTP密码',
+            hint_text='输入FTP密码（留空则清除）',
             password=True,
         )
         if available_font:
             ti.font_name = 'Chinese'
         content.add_widget(ti)
         
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        test_btn = DarkButton(text='测试连接', size_hint_x=0.5)
-        save_btn = DarkButton(text='保存', size_hint_x=0.5)
+        # 显示当前状态
+        status_hint = Label(
+            text=f'当前状态: {"✅ 已设置密码" if current_password else "❌ 未设置密码"}',
+            color=COLORS['success'] if current_password else COLORS['danger'],
+            font_size=dp(12), size_hint_y=None, height=dp(24),
+        )
+        if available_font:
+            status_hint.font_name = 'Chinese'
+        content.add_widget(status_hint)
+        
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        test_btn = DarkButton(text='测试连接', size_hint_x=0.5, height=dp(28), font_size=dp(11))
+        save_btn = DarkButton(text='保存', size_hint_x=0.5, height=dp(28), font_size=dp(11))
         btn_row.add_widget(test_btn)
         btn_row.add_widget(save_btn)
         content.add_widget(btn_row)
         
-        cancel_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        cancel_btn = DarkButton(text='取消', size_hint_x=1)
+        cancel_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        clear_btn = DarkButton(text='清除密码', size_hint_x=0.5, height=dp(28), font_size=dp(11))
+        clear_btn.background_color = COLORS['danger']
+        cancel_btn = DarkButton(text='取消', size_hint_x=0.5, height=dp(28), font_size=dp(11))
+        cancel_row.add_widget(clear_btn)
         cancel_row.add_widget(cancel_btn)
         content.add_widget(cancel_row)
         
         status_label = Label(
-            text='', color=COLORS['hint'], font_size=dp(13),
-            size_hint_y=None, height=dp(30),
+            text='', color=COLORS['hint'], font_size=dp(12),
+            size_hint_y=None, height=dp(24),
         )
         if available_font:
             status_label.font_name = 'Chinese'
         content.add_widget(status_label)
 
-        popup = Popup(title='设置FTP密码', content=content, size_hint=(0.9, 0.65),
+        popup = Popup(title='设置FTP密码', content=content, size_hint=(0.9, 0.7),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
             popup.title_font = 'Chinese'
@@ -1236,30 +1269,47 @@ class MiniNoteApp(App):
                 ftp.quit()
                 status_label.text = '✅ 连接成功！'
                 status_label.color = COLORS['success']
+                status_hint.text = '当前状态: ✅ 已设置密码（已验证）'
+                status_hint.color = COLORS['success']
             except Exception as e:
                 status_label.text = f'❌ 连接失败: {str(e)[:40]}'
                 status_label.color = COLORS['danger']
 
         def save_password_and_close(*a):
             password = ti.text.strip()
-            if not password:
-                status_label.text = '❌ 请输入密码'
-                status_label.color = COLORS['danger']
-                return
             if save_password(password):
-                status_label.text = '✅ 密码已保存'
-                status_label.color = COLORS['success']
-                self.update_status('FTP密码已设置')
+                if password:
+                    status_label.text = '✅ 密码已保存'
+                    status_hint.text = '当前状态: ✅ 已设置密码'
+                    status_hint.color = COLORS['success']
+                    self.update_status('FTP密码已设置')
+                else:
+                    status_label.text = '✅ 密码已清除'
+                    status_hint.text = '当前状态: ❌ 未设置密码'
+                    status_hint.color = COLORS['danger']
+                    self.update_status('FTP密码已清除')
                 Clock.schedule_once(lambda dt: popup.dismiss(), 0.5)
-                # 如果已有用户名，重新加载数据
                 if self.username:
                     self.load_data()
             else:
-                status_label.text = '❌ 保存失败'
+                status_label.text = '❌ 操作失败'
+                status_label.color = COLORS['danger']
+
+        def clear_password_and_close(*a):
+            if save_password(''):
+                status_label.text = '✅ 密码已清除'
+                status_label.color = COLORS['success']
+                status_hint.text = '当前状态: ❌ 未设置密码'
+                status_hint.color = COLORS['danger']
+                ti.text = ''
+                self.update_status('FTP密码已清除')
+            else:
+                status_label.text = '❌ 清除失败'
                 status_label.color = COLORS['danger']
 
         test_btn.bind(on_press=test_connection)
         save_btn.bind(on_press=save_password_and_close)
+        clear_btn.bind(on_press=clear_password_and_close)
         cancel_btn.bind(on_press=popup.dismiss)
         ti.bind(on_text_validate=test_connection)
         popup.open()
@@ -1275,14 +1325,12 @@ class MiniNoteApp(App):
         filename = f'{self.username}.note'
         self.update_status(f'正在加载 {filename}...')
         
-        # 1. 优先从服务器加载
         if has_password():
             self.update_status(f'从服务器加载 {filename}...')
             ftp_content = ftp_download_json(filename)
             if ftp_content:
                 try:
                     data = json.loads(ftp_content)
-                    # 确保用户名一致
                     data['username'] = self.username
                     self._apply_data(data)
                     self.last_loaded_source = f'服务器: {filename}'
@@ -1291,7 +1339,6 @@ class MiniNoteApp(App):
                 except Exception as e:
                     print(f"服务器数据解析失败: {e}")
         
-        # 2. 服务器加载失败，尝试本地
         self.update_status(f'从本地加载 {filename}...')
         local_data = self._load_local_data(filename)
         if local_data:
@@ -1301,7 +1348,6 @@ class MiniNoteApp(App):
             self.update_status(f'已从本地加载: {filename}')
             return
         
-        # 3. 都没有，新建空白
         self.update_status(f'新建空白笔记: {filename}')
         self._create_new_note()
 
@@ -1311,10 +1357,10 @@ class MiniNoteApp(App):
         
         if platform == 'android':
             search_dirs = [
-                self.user_data_dir,  # 应用私有目录
-                '/storage/emulated/0',  # 内部存储根目录
-                '/sdcard',  # SD卡
-                '.',  # 当前目录（打包后可能不可写）
+                self.user_data_dir,
+                '/storage/emulated/0',
+                '/sdcard',
+                '.',
             ]
         else:
             search_dirs = [
@@ -1336,21 +1382,17 @@ class MiniNoteApp(App):
 
     def _apply_data(self, data):
         """应用加载的数据到界面"""
-        # 保存用户名
         self.username = data.get('username', self.username)
         if self.main_layout:
             self.main_layout.user_label.text = self.username
         
-        # 保存下载目录
         if 'download_dir' in data:
             dd = data['download_dir']
-            # 安卓上过滤掉Windows路径
             if platform == 'android' and (':' in dd or dd.startswith('d:') or dd.startswith('D:')):
-                pass  # 保持安卓默认下载目录
+                pass
             else:
                 self.download_dir = dd
         
-        # 分离保留页和文本页
         self.preserved_tabs = []
         text_tabs = []
         has_transfer = False
@@ -1362,17 +1404,14 @@ class MiniNoteApp(App):
             elif t == 'transfer':
                 has_transfer = True
             else:
-                # calc / trans 以及其他未知类型 → 原样保留
                 self.preserved_tabs.append(copy.deepcopy(tab))
         
-        # 保存其他数据（不包含 tabs, username, download_dir）
         self.other_data = {
             k: copy.deepcopy(v)
             for k, v in data.items()
             if k not in ('tabs', 'username', 'download_dir')
         }
         
-        # 检查是否有传输页需要保留
         transfer_widget = None
         if self.main_layout:
             for t in self.main_layout.tabs:
@@ -1380,7 +1419,6 @@ class MiniNoteApp(App):
                     transfer_widget = t['widget']
                     break
         
-        # 清空当前界面，重建
         if self.main_layout:
             self.main_layout.tabs.clear()
             self.main_layout.editor_counter = 1
@@ -1396,7 +1434,6 @@ class MiniNoteApp(App):
             if has_transfer or transfer_widget is not None:
                 self.main_layout.add_transfer_tab()
             
-            # 显示第一个文本页
             for i, t in enumerate(self.main_layout.tabs):
                 if t['type'] == 'text':
                     self.main_layout.show_tab(i)
@@ -1425,13 +1462,11 @@ class MiniNoteApp(App):
         if not has_password():
             if not silent:
                 self.update_status('未设置FTP密码，仅保存到本地')
-                # 不弹窗干扰用户，只在状态栏提示
         
         filename = f'{self.username}.note'
         
-        # 组装 tabs：先放保留的 calc/trans，再放当前文本页，最后放 transfer
         tabs = []
-        tabs.extend(copy.deepcopy(self.preserved_tabs))  # 计算、翻译原样
+        tabs.extend(copy.deepcopy(self.preserved_tabs))
         
         if self.main_layout:
             for tab in self.main_layout.tabs:
@@ -1448,7 +1483,6 @@ class MiniNoteApp(App):
                         'content': '',
                     })
         
-        # 组装完整数据
         data = copy.deepcopy(self.other_data)
         data['username'] = self.username
         data['tabs'] = tabs
@@ -1456,7 +1490,7 @@ class MiniNoteApp(App):
         
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
         
-        # ── 本地保存 ──
+        # 本地保存
         local_ok = False
         save_paths = [filename]
         if platform == 'android':
@@ -1475,7 +1509,7 @@ class MiniNoteApp(App):
             except Exception as e:
                 print(f'本地保存失败 {path}: {e}')
         
-        # ── FTP 保存 ──
+        # FTP保存
         ftp_ok = False
         if has_password():
             ftp_ok = ftp_upload_json(json_str, filename)
@@ -1483,7 +1517,7 @@ class MiniNoteApp(App):
             if not is_auto and not silent:
                 self.update_status('FTP未配置，仅保存到本地')
         
-        # ── 状态更新 ──
+        # 状态更新
         if is_auto:
             if local_ok and ftp_ok:
                 self.last_auto_save_msg = '自动保存 ✓'
@@ -1508,37 +1542,6 @@ class MiniNoteApp(App):
             if not silent:
                 self.show_message('保存失败，请检查网络或权限')
 
-    def _save_local(self, filename, content):
-        """保存到本地 - 适配Android"""
-        save_paths = []
-        
-        if platform == 'android':
-            # Android: 优先应用私有目录，其次存储卡根目录
-            save_paths = [
-                os.path.join(self.user_data_dir, filename),
-                os.path.join('/storage/emulated/0', filename),
-                os.path.join('/sdcard', filename),
-            ]
-        else:
-            # 非Android: 当前目录和用户目录
-            save_paths = [
-                filename,
-                os.path.join(os.path.expanduser('~'), filename),
-            ]
-        
-        for path in save_paths:
-            try:
-                folder = os.path.dirname(path)
-                if folder and not os.path.isdir(folder):
-                    os.makedirs(folder, exist_ok=True)
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                print(f"✅ 本地保存成功: {path}")
-                return True
-            except Exception as e:
-                print(f'❌ 本地保存失败 {path}: {e}')
-        return False
-
     # ── 工具 ──
 
     def update_status(self, msg=None):
@@ -1551,7 +1554,7 @@ class MiniNoteApp(App):
         if available_font:
             lbl.font_name = 'Chinese'
         content.add_widget(lbl)
-        btn = DarkButton(text='确定', size_hint_y=None, height=dp(40))
+        btn = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         content.add_widget(btn)
         popup = Popup(title='提示', content=content, size_hint=(0.8, 0.35),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
@@ -1566,9 +1569,9 @@ class MiniNoteApp(App):
         if available_font:
             lbl.font_name = 'Chinese'
         content.add_widget(lbl)
-        btn_row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        no_btn = DarkButton(text='取消')
-        yes_btn = DarkButton(text='确定')
+        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
+        no_btn = DarkButton(text='取消', height=dp(28), font_size=dp(11))
+        yes_btn = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         yes_btn.background_color = (0.7, 0.25, 0.25, 1)
         btn_row.add_widget(no_btn)
         btn_row.add_widget(yes_btn)
