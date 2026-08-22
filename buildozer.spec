@@ -4,14 +4,9 @@ package.name = mininote
 package.domain = org.example
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,ttc,otf
-source.include_patterns = 
-    *.ttf
-    *.ttc
-    *.otf
-
+source.include_patterns = *.ttf,*.ttc,*.otf
 version = 1.17
 requirements = python3,kivy,hostpython3
-
 orientation = all
 fullscreen = 0
 android.api = 33
@@ -19,9 +14,7 @@ android.minapi = 21
 android.ndk = 25b
 android.sdk = 33
 android.archs = arm64-v8a,armeabi-v7a
-
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-
 android.logcat_filters = *:S python:D
 
 [buildozer]
