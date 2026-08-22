@@ -1,5 +1,5 @@
 [app]
-title = mini note
+title = 精简记事本
 package.name = mininote
 package.domain = org.example
 source.dir = .
