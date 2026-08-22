@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.16
+精简版多标签记事本 - 安卓版 (Kivy) V1.17
 功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
@@ -10,7 +10,7 @@
 - 横竖屏自适应
 - 自带等宽中文字体（Sarasa Mono SC）
 - 编辑器字体大小可调（dp10~dp28）
-- 状态栏显示当前加载的字体
+- 状态栏显示字体加载详情
 """
 
 import os
@@ -43,22 +43,33 @@ from kivy.core.text import LabelBase
 from kivy.resources import resource_find
 
 # ═══════════════════════════════════════════════════════════════
-# 字体配置 - 优先使用打包的等宽字体
+# 字体配置 - 优先使用打包的等宽字体，回退到系统中文字体
 # ═══════════════════════════════════════════════════════════════
 
 # 字体文件名
 FONT_FILENAME = 'SarasaMonoSC-Regular.ttf'
+
+# 用于存储字体加载日志
+FONT_LOG = []
+
+def log_font(msg):
+    """记录字体加载日志"""
+    FONT_LOG.append(msg)
+    print(msg)
 
 def get_font_path():
     """获取字体路径，优先从 APK 中查找"""
     # 1. 使用 resource_find（Kivy 推荐方式）
     font_path = resource_find(FONT_FILENAME)
     if font_path and os.path.exists(font_path):
+        log_font(f"✅ resource_find 找到: {font_path}")
         return font_path
     
     # 2. 检查当前目录
     if os.path.exists(FONT_FILENAME):
-        return os.path.abspath(FONT_FILENAME)
+        path = os.path.abspath(FONT_FILENAME)
+        log_font(f"✅ 当前目录找到: {path}")
+        return path
     
     # 3. 检查 user_data_dir
     try:
@@ -67,27 +78,33 @@ def get_font_path():
         if app:
             user_path = os.path.join(app.user_data_dir, FONT_FILENAME)
             if os.path.exists(user_path):
+                log_font(f"✅ user_data_dir 找到: {user_path}")
                 return user_path
     except:
         pass
     
+    log_font(f"❌ 未找到打包字体: {FONT_FILENAME}")
     return None
 
 # 构建搜索路径列表（按优先级）
 CHINESE_FONT_PATHS = []
 
-# 先添加打包字体（如果有）
+# 先添加系统中文字体（确保中文能显示）
+CHINESE_FONT_PATHS.extend([
+    '/system/fonts/DroidSansFallback.ttf',   # Android 全版本通用中文字体
+    '/system/fonts/NotoSansCJK-Regular.ttc',
+    '/system/fonts/NotoSansSC-Regular.otf',
+])
+
+# 再添加打包字体（如果有）
 packed_font = get_font_path()
 if packed_font:
     CHINESE_FONT_PATHS.append(packed_font)
 
-# 再添加系统字体作为回退
+# 最后添加系统等宽字体
 CHINESE_FONT_PATHS.extend([
     '/system/fonts/NotoSansMonoCJK-Regular.ttc',
     '/system/fonts/DroidSansMono.ttf',
-    '/system/fonts/DroidSansFallback.ttf',
-    '/system/fonts/NotoSansCJK-Regular.ttc',
-    '/system/fonts/NotoSansSC-Regular.otf',
     '/system/fonts/Roboto-Regular.ttf',
     # 项目内置其他字体
     'NotoSansMonoCJK-Regular.ttc',
@@ -104,9 +121,12 @@ CHINESE_FONT_PATHS.extend([
 
 # 存储字体加载状态
 FONT_STATUS = ''
+FONT_DETAIL = []
 
 available_font = None
-for font_path in CHINESE_FONT_PATHS:
+
+log_font("===== 开始搜索字体 =====")
+for idx, font_path in enumerate(CHINESE_FONT_PATHS):
     if font_path and os.path.exists(font_path):
         try:
             LabelBase.register(name='Chinese', fn_regular=font_path)
@@ -117,20 +137,22 @@ for font_path in CHINESE_FONT_PATHS:
                 FONT_STATUS = f'✅ {font_name} ✓等宽'
             else:
                 FONT_STATUS = f'✅ {font_name} (比例)'
-            print(f"✅ 已注册中文字体: {font_path}")
+            log_font(f"✅ 注册成功[{idx}]: {font_path}")
+            log_font(f"✅ 字体状态: {FONT_STATUS}")
             break
         except Exception as e:
-            print(f"❌ 注册失败 {font_path}: {e}")
+            log_font(f"❌ 注册失败[{idx}] {font_path}: {e}")
+    elif font_path:
+        log_font(f"⚠️ 字体不存在[{idx}]: {font_path}")
 
 if available_font is None:
     FONT_STATUS = '⚠️ 无中文字体'
-    print("⚠️ 未找到中文字体，中文可能无法显示")
-else:
-    # 判断是否为等宽字体
-    if 'Mono' in available_font or 'Sarasa' in available_font or 'Consolas' in available_font:
-        print(f"✅ 等宽字体: 中英文严格对齐")
-    else:
-        print(f"⚠️ 普通字体: 可能不对齐")
+    log_font("❌ 所有字体都未找到或注册失败")
+
+# 构建详细日志（用于状态栏显示）
+FONT_DETAIL = FONT_LOG.copy()
+
+log_font("===== 字体搜索完成 =====")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -140,8 +162,8 @@ else:
 FTP_HOST = '014.3vftp.cn'
 FTP_PORT = 3535
 FTP_USER = 'zhw63'
-PASSWORD_FILE = 'ftp_password.txt'  # 保存FTP密码的文件
-AUTO_SAVE_INTERVAL = 5.0  # 秒
+PASSWORD_FILE = 'ftp_password.txt'
+AUTO_SAVE_INTERVAL = 5.0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -149,7 +171,6 @@ AUTO_SAVE_INTERVAL = 5.0  # 秒
 # ═══════════════════════════════════════════════════════════════
 
 def save_password(password):
-    """保存FTP密码到文件"""
     try:
         with open(PASSWORD_FILE, 'w', encoding='utf-8') as f:
             f.write(password)
@@ -159,7 +180,6 @@ def save_password(password):
         return False
 
 def load_password():
-    """从文件加载FTP密码"""
     try:
         if os.path.exists(PASSWORD_FILE):
             with open(PASSWORD_FILE, 'r', encoding='utf-8') as f:
@@ -169,7 +189,6 @@ def load_password():
     return ''
 
 def has_password():
-    """检查是否已设置密码"""
     return bool(load_password())
 
 
@@ -178,7 +197,6 @@ def has_password():
 # ═══════════════════════════════════════════════════════════════
 
 def get_ftp():
-    """获取FTP连接"""
     password = load_password()
     if not password:
         raise Exception('请先设置FTP密码')
@@ -351,10 +369,9 @@ class TabButton(Button):
         self.dragging = False
         self.drag_start = None
         self.is_dragging = False
-        # 长按相关
         self.long_press_event = None
         self.long_press_triggered = False
-        self.long_press_delay = 0.8  # 长按阈值（秒）
+        self.long_press_delay = 0.8
         if available_font:
             self.font_name = 'Chinese'
         self.set_active(active)
@@ -382,7 +399,6 @@ class TabButton(Button):
         self.drag_start = touch.pos
         self.is_dragging = False
         self.long_press_triggered = False
-        # 启动长按定时器
         self.long_press_event = Clock.schedule_once(self._on_long_press, self.long_press_delay)
         super().on_touch_down(touch)
         return True
@@ -393,7 +409,6 @@ class TabButton(Button):
         dx = touch.pos[0] - self.drag_start[0]
         dy = touch.pos[1] - self.drag_start[1]
         if abs(dx) > dp(15) or abs(dy) > dp(15):
-            # 移动时取消长按
             if self.long_press_event:
                 self.long_press_event.cancel()
                 self.long_press_event = None
@@ -410,7 +425,6 @@ class TabButton(Button):
         return True
 
     def on_touch_up(self, touch):
-        # 取消长按定时器
         if self.long_press_event:
             self.long_press_event.cancel()
             self.long_press_event = None
@@ -429,7 +443,6 @@ class TabButton(Button):
                     parent.end_drag(self, touch)
                 return True
             
-            # 如果长按已触发，不触发点击
             if self.long_press_triggered:
                 return True
             
@@ -439,9 +452,7 @@ class TabButton(Button):
         return super().on_touch_up(touch)
 
     def _on_long_press(self, dt):
-        """长按回调：删除标签"""
         self.long_press_triggered = True
-        # 找到父布局执行删除
         parent = self.parent
         while parent and not hasattr(parent, 'close_tab_by_btn'):
             parent = parent.parent
@@ -450,7 +461,7 @@ class TabButton(Button):
 
 
 # ═══════════════════════════════════════════════════════════════
-# 文本编辑页 - 支持等宽字体和自定义字体大小
+# 文本编辑页
 # ═══════════════════════════════════════════════════════════════
 
 class TextTab(BoxLayout):
@@ -461,7 +472,6 @@ class TextTab(BoxLayout):
         self.title = title
         self.padding = dp(4)
         
-        # 获取当前字体大小
         font_size = dp(16)
         if app_ref and hasattr(app_ref, 'editor_font_size'):
             font_size = dp(app_ref.editor_font_size)
@@ -488,7 +498,6 @@ class TextTab(BoxLayout):
         self.text_input.text = content
     
     def set_font_size(self, size):
-        """更新字体大小"""
         self.text_input.font_size = dp(size)
 
 
@@ -780,13 +789,19 @@ class MainLayout(BoxLayout):
         self.add_widget(self.content_area)
 
         # ===== 状态栏 =====
-        status = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
-        with status.canvas.before:
+        # 状态栏分两行显示：
+        # 第一行：字体状态
+        # 第二行：详细日志（循环显示）
+        status_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(28))
+        
+        # 第一行：字体状态
+        status_row1 = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
+        with status_row1.canvas.before:
             Color(*COLORS['status'])
-            self._status_bg = Rectangle(pos=status.pos, size=status.size)
-        status.bind(
-            pos=lambda *a: setattr(self._status_bg, 'pos', status.pos),
-            size=lambda *a: setattr(self._status_bg, 'size', status.size),
+            self._status_bg1 = Rectangle(pos=status_row1.pos, size=status_row1.size)
+        status_row1.bind(
+            pos=lambda *a: setattr(self._status_bg1, 'pos', status_row1.pos),
+            size=lambda *a: setattr(self._status_bg1, 'size', status_row1.size),
         )
         self.status_left = Label(text='就绪', color=(1, 1, 1, 1), font_size=dp(10),
                                  halign='left', size_hint_x=0.55)
@@ -798,9 +813,31 @@ class MainLayout(BoxLayout):
         if available_font:
             self.status_right.font_name = 'Chinese'
         self.status_right.bind(size=self.status_right.setter('text_size'))
-        status.add_widget(self.status_left)
-        status.add_widget(self.status_right)
-        self.add_widget(status)
+        status_row1.add_widget(self.status_left)
+        status_row1.add_widget(self.status_right)
+        status_layout.add_widget(status_row1)
+        
+        # 第二行：详细日志（滚动显示）
+        status_row2 = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
+        with status_row2.canvas.before:
+            Color(*COLORS['status'])
+            self._status_bg2 = Rectangle(pos=status_row2.pos, size=status_row2.size)
+        status_row2.bind(
+            pos=lambda *a: setattr(self._status_bg2, 'pos', status_row2.pos),
+            size=lambda *a: setattr(self._status_bg2, 'size', status_row2.size),
+        )
+        
+        # 构建日志显示文本（取最后几条）
+        log_text = ' | '.join(FONT_LOG[-3:]) if FONT_LOG else '无日志'
+        self.status_log = Label(text=log_text, color=(0.8, 0.8, 0.8, 1), font_size=dp(9),
+                                halign='left', size_hint_x=1, shorten=True, shorten_from='right')
+        if available_font:
+            self.status_log.font_name = 'Chinese'
+        self.status_log.bind(size=self.status_log.setter('text_size'))
+        status_row2.add_widget(self.status_log)
+        status_layout.add_widget(status_row2)
+        
+        self.add_widget(status_layout)
 
         # 首次启动检查
         Clock.schedule_once(lambda dt: self.app.check_first_start(), 0.1)
@@ -894,7 +931,6 @@ class MainLayout(BoxLayout):
         for btn in temp_tabs:
             self.tab_bar.add_widget(btn)
         
-        # 只有 + 按钮，没有 - 按钮（长按标签删除）
         plus = DarkButton(text='+', size_hint_x=None, width=dp(30), height=dp(18), font_size=dp(14))
         plus.bind(on_press=lambda *a: self.add_text_tab())
         self.tab_bar.add_widget(plus)
@@ -913,7 +949,6 @@ class MainLayout(BoxLayout):
         self.close_tab(self.current_index)
 
     def close_tab_by_btn(self, btn):
-        """通过按钮实例删除标签（长按触发）"""
         for i, tab in enumerate(self.tabs):
             if tab['btn'] == btn:
                 self.close_tab(i)
@@ -1056,7 +1091,6 @@ class MainLayout(BoxLayout):
             self.status_right.text = FONT_STATUS
 
     def update_all_editor_font_size(self, size):
-        """更新所有已打开标签的字体大小"""
         for tab in self.tabs:
             if tab['type'] == 'text':
                 tab['widget'].set_font_size(size)
@@ -1074,7 +1108,7 @@ class MiniNoteApp(App):
         self.last_auto_save_msg = ''
         self.download_dir = self._default_download_dir()
         self.main_layout = None
-        self.editor_font_size = 16  # 默认字体大小
+        self.editor_font_size = 16
 
         self.preserved_tabs = []
         self.other_data = {}
@@ -1082,7 +1116,6 @@ class MiniNoteApp(App):
         self._auto_save_event = None
         self._dirty = False
         
-        # 加载已保存的用户名
         self._load_username()
 
     def set_download_dir(self):
@@ -1128,7 +1161,6 @@ class MiniNoteApp(App):
         popup.open()
 
     def set_editor_font_size(self):
-        """设置编辑器字体大小"""
         content = BoxLayout(orientation='vertical', spacing=dp(12), padding=dp(16))
         
         lbl = Label(
@@ -1139,7 +1171,6 @@ class MiniNoteApp(App):
             lbl.font_name = 'Chinese'
         content.add_widget(lbl)
         
-        # 滑块
         slider = Slider(
             min=10, max=28, value=self.editor_font_size,
             step=1, size_hint_y=None, height=dp(40),
@@ -1149,7 +1180,6 @@ class MiniNoteApp(App):
         slider.value_track_color = COLORS['accent']
         content.add_widget(slider)
         
-        # 预览文字（实时显示当前字体大小效果）
         preview = TextInput(
             text='abcABC123 中文汉字',
             multiline=False, font_size=dp(self.editor_font_size),
@@ -1161,7 +1191,6 @@ class MiniNoteApp(App):
             preview.font_name = 'Chinese'
         content.add_widget(preview)
         
-        # 提示
         hint = Label(
             text='拖动滑块调整大小（范围: 10 ~ 28）',
             color=COLORS['hint'], font_size=dp(12), size_hint_y=None, height=dp(24),
@@ -1182,7 +1211,6 @@ class MiniNoteApp(App):
         if available_font:
             popup.title_font = 'Chinese'
         
-        # 滑块事件
         def on_slider_change(instance, value):
             size = int(value)
             lbl.text = f'当前字体大小: {size}'
@@ -1194,11 +1222,9 @@ class MiniNoteApp(App):
         def on_ok(*a):
             size = int(slider.value)
             self.editor_font_size = size
-            # 更新所有已打开的标签
             if self.main_layout:
                 self.main_layout.update_all_editor_font_size(size)
             self.update_status(f'字体大小已设为: {size}')
-            # 保存数据（包含字体大小）
             self.save_data(silent=True)
             popup.dismiss()
         
@@ -1207,7 +1233,6 @@ class MiniNoteApp(App):
         popup.open()
 
     def _default_download_dir(self):
-        """获取默认下载目录 - 针对Android手机"""
         if platform == 'android':
             android_dirs = [
                 '/storage/emulated/0/Download',
@@ -1228,7 +1253,6 @@ class MiniNoteApp(App):
             return os.path.join(os.path.expanduser('~'), 'Downloads')
 
     def _load_username(self):
-        """从本地文件加载用户名 - 适配Android"""
         search_dirs = []
         
         if platform == 'android':
@@ -1254,7 +1278,6 @@ class MiniNoteApp(App):
                             data = json.load(file)
                             if 'username' in data and data['username']:
                                 self.username = data['username']
-                                # 加载字体大小
                                 if 'editor_font_size' in data:
                                     self.editor_font_size = data['editor_font_size']
                                 print(f"✅ 从文件恢复用户名: {self.username} ({f})")
@@ -1266,7 +1289,6 @@ class MiniNoteApp(App):
         print("⚠️ 未找到已保存的用户名")
 
     def check_first_start(self):
-        """检查是否首次启动"""
         if not self.username:
             self.show_message('首次使用，请先设置用户名和FTP密码')
             Clock.schedule_once(lambda dt: self.set_username(), 0.5)
@@ -1294,7 +1316,6 @@ class MiniNoteApp(App):
         self.save_data(silent=True, is_auto=True)
 
     def _on_resize(self, window, width, height):
-        """横竖屏适配 - 调整标签宽度"""
         if width <= 0 or height <= 0 or not self.main_layout:
             return
         is_landscape = width > height
@@ -1308,8 +1329,6 @@ class MiniNoteApp(App):
                 btn = tab.get('btn')
                 if btn and isinstance(btn, TabButton):
                     btn.width = dp(90)
-
-    # ── 设置用户名 ──
 
     def set_username(self):
         content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(12))
@@ -1355,8 +1374,6 @@ class MiniNoteApp(App):
         ok.bind(on_press=on_ok)
         popup.open()
 
-    # ── 设置FTP密码 ──
-
     def set_ftp_password(self):
         content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(12))
         lbl = Label(
@@ -1380,7 +1397,6 @@ class MiniNoteApp(App):
             ti.font_name = 'Chinese'
         content.add_widget(ti)
         
-        # 显示当前状态
         status_hint = Label(
             text=f'当前状态: {"✅ 已设置密码" if current_password else "❌ 未设置密码"}',
             color=COLORS['success'] if current_password else COLORS['danger'],
@@ -1476,10 +1492,7 @@ class MiniNoteApp(App):
         ti.bind(on_text_validate=test_connection)
         popup.open()
 
-    # ── 加载数据（优先服务器） ──
-
     def load_data(self):
-        """加载数据：优先从服务器加载，失败则加载本地"""
         if not self.username:
             self.update_status('请先设置用户名')
             return
@@ -1514,7 +1527,6 @@ class MiniNoteApp(App):
         self._create_new_note()
 
     def _load_local_data(self, filename):
-        """从本地加载数据 - 适配Android"""
         search_dirs = []
         
         if platform == 'android':
@@ -1543,12 +1555,10 @@ class MiniNoteApp(App):
         return None
 
     def _apply_data(self, data):
-        """应用加载的数据到界面"""
         self.username = data.get('username', self.username)
         if self.main_layout:
             self.main_layout.user_label.text = self.username
         
-        # 加载字体大小
         if 'editor_font_size' in data:
             self.editor_font_size = data['editor_font_size']
         
@@ -1600,7 +1610,6 @@ class MiniNoteApp(App):
             if has_transfer or transfer_widget is not None:
                 self.main_layout.add_transfer_tab()
             
-            # 应用字体大小到所有标签
             self.main_layout.update_all_editor_font_size(self.editor_font_size)
             
             for i, t in enumerate(self.main_layout.tabs):
@@ -1609,7 +1618,6 @@ class MiniNoteApp(App):
                     break
 
     def _create_new_note(self):
-        """创建新笔记"""
         self.main_layout.tabs.clear()
         self.main_layout.editor_counter = 1
         self.main_layout.add_text_tab()
@@ -1617,11 +1625,8 @@ class MiniNoteApp(App):
         self.main_layout.show_tab(0)
         self.preserved_tabs = []
         self.other_data = {}
-        # 应用字体大小
         self.main_layout.update_all_editor_font_size(self.editor_font_size)
         self.update_status(f'新建笔记: {self.username}.note')
-
-    # ── 保存数据 ──
 
     def save_data(self, silent=False, is_auto=False):
         if not self.username:
@@ -1662,7 +1667,6 @@ class MiniNoteApp(App):
         
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
         
-        # 本地保存
         local_ok = False
         save_paths = [filename]
         if platform == 'android':
@@ -1681,7 +1685,6 @@ class MiniNoteApp(App):
             except Exception as e:
                 print(f'本地保存失败 {path}: {e}')
         
-        # FTP保存
         ftp_ok = False
         if has_password():
             ftp_ok = ftp_upload_json(json_str, filename)
@@ -1689,7 +1692,6 @@ class MiniNoteApp(App):
             if not is_auto and not silent:
                 self.update_status('FTP未配置，仅保存到本地')
         
-        # 状态更新
         if is_auto:
             if local_ok and ftp_ok:
                 self.last_auto_save_msg = '自动保存 ✓'
@@ -1713,8 +1715,6 @@ class MiniNoteApp(App):
             self.update_status('保存失败')
             if not silent:
                 self.show_message('保存失败，请检查网络或权限')
-
-    # ── 工具 ──
 
     def update_status(self, msg=None):
         if self.main_layout:
