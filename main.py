@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy)
+精简版多标签记事本 - 安卓版 (Kivy) , v1.00
 功能：多标签文本编辑 + FTP 传输
 - 计算页、翻译页：下载后原样保留，不修改、不显示
 - 只更新文本编辑页
@@ -254,10 +254,9 @@ class DarkButton(Button):
 
 
 class TabButton(Button):
-    def __init__(self, title='', active=False, closable=False, **kwargs):
+    def __init__(self, title='', active=False, **kwargs):
         super().__init__(**kwargs)
         self.title = title
-        self.closable = closable
         self.background_normal = ''
         self.font_size = dp(13)
         self.size_hint_x = None
@@ -266,7 +265,6 @@ class TabButton(Button):
         if available_font:
             self.font_name = 'Chinese'
         self.set_active(active)
-        self.on_close_press = None
 
     def set_active(self, active):
         self.active = active
@@ -276,21 +274,7 @@ class TabButton(Button):
         else:
             self.background_color = COLORS['tab_inactive']
             self.color = (0.59, 0.59, 0.59, 1)
-        text = f'  {self.title}  '
-        if self.closable:
-            text += ' X'  # 使用 X
-        self.text = text
-
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos):
-            if self.closable and self.text.endswith('X'):
-                rel_x = touch.pos[0] - self.pos[0]
-                if rel_x > self.width * 0.55:
-                    if self.on_close_press:
-                        self.on_close_press()
-                    return True
-            return super().on_touch_down(touch)
-        return super().on_touch_down(touch)
+        self.text = f'  {self.title}  '
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -630,21 +614,31 @@ class MainLayout(BoxLayout):
             btn = TabButton(
                 title=tab['title'],
                 active=(i == self.current_index),
-                closable=(tab['type'] in ('text', 'transfer')),
             )
             # 绑定点击事件（切换标签）
             btn.bind(on_press=partial(self._on_tab_press, i))
-            # 设置关闭回调（点击 ×）
-            btn.on_close_press = partial(self.close_tab, i)
             tab['btn'] = btn
             self.tab_bar.add_widget(btn)
+        
+        # 添加 + 按钮（新建标签）
         plus = DarkButton(text='+', size_hint_x=None, width=dp(40), height=dp(32))
         plus.bind(on_press=lambda *a: self.add_text_tab())
         self.tab_bar.add_widget(plus)
+        
+        # 添加 - 按钮（删除当前标签）
+        minus = DarkButton(text='-', size_hint_x=None, width=dp(40), height=dp(32))
+        minus.bind(on_press=lambda *a: self.close_current_tab())
+        self.tab_bar.add_widget(minus)
 
     def _on_tab_press(self, index, instance):
-        # 只负责切换标签，不处理关闭
+        # 只负责切换标签
         self.show_tab(index)
+
+    def close_current_tab(self):
+        """删除当前选中的标签"""
+        if self.current_index < 0 or self.current_index >= len(self.tabs):
+            return
+        self.close_tab(self.current_index)
 
     def show_tab(self, index):
         if index < 0 or index >= len(self.tabs):
