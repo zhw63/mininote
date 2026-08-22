@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.13
+精简版多标签记事本 - 安卓版 (Kivy) V1.15
 功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
 - 每5秒自动保存到本地 + FTP
 - 长按标签删除（0.8秒）
 - 横竖屏自适应
-- 等宽中文字体（NotoSansMonoCJK）
+- 自带等宽中文字体（Sarasa Mono SC）
 - 编辑器字体大小可调（dp10~dp28）
 """
 
@@ -41,22 +41,49 @@ from kivy.utils import platform
 from kivy.core.text import LabelBase
 
 # ═══════════════════════════════════════════════════════════════
-# 字体配置 - 优先等宽中文字体
+# 字体配置 - 优先使用打包的等宽字体
 # ═══════════════════════════════════════════════════════════════
 
+# 字体文件路径（相对于项目根目录）
+FONT_FILENAME = 'SarasaMonoSC-Regular.ttf'
+
+# 获取字体文件的绝对路径
+def get_font_path():
+    """获取字体文件路径，支持打包和开发环境"""
+    # 1. 检查当前目录
+    if os.path.exists(FONT_FILENAME):
+        return FONT_FILENAME
+    # 2. 检查用户数据目录（Android 打包后）
+    from kivy.app import App
+    app = App.get_running_app()
+    if app:
+        font_path = os.path.join(app.user_data_dir, FONT_FILENAME)
+        if os.path.exists(font_path):
+            return font_path
+    # 3. 检查当前目录的上级（某些打包场景）
+    for path in ['./', '../', './fonts/', './assets/']:
+        full_path = os.path.join(path, FONT_FILENAME)
+        if os.path.exists(full_path):
+            return full_path
+    return None
+
+# 字体搜索路径（按优先级）
 CHINESE_FONT_PATHS = [
-    # Android 等宽 CJK 字体（优先）
+    # 1. 打包的等宽字体（最优）
+    get_font_path(),
+    # 2. Android 等宽字体
     '/system/fonts/NotoSansMonoCJK-Regular.ttc',
     '/system/fonts/DroidSansMono.ttf',
-    '/system/fonts/NotoSansCJK-Regular.ttc',
+    # 3. Android 普通中文字体（回退）
     '/system/fonts/DroidSansFallback.ttf',
+    '/system/fonts/NotoSansCJK-Regular.ttc',
     '/system/fonts/NotoSansSC-Regular.otf',
     '/system/fonts/Roboto-Regular.ttf',
-    # 项目内置字体（打包时放入根目录）
+    # 4. 项目内置其他字体
     'NotoSansMonoCJK-Regular.ttc',
     'NotoSansCJK-Regular.ttc',
     'DroidSansFallback.ttf',
-    # Windows 等宽字体
+    # 5. Windows 字体（PC测试）
     'C:/Windows/Fonts/Consolas.ttf',
     'C:/Windows/Fonts/simsun.ttc',
     'C:/Windows/Fonts/msyh.ttc',
@@ -67,7 +94,7 @@ CHINESE_FONT_PATHS = [
 
 available_font = None
 for font_path in CHINESE_FONT_PATHS:
-    if os.path.exists(font_path):
+    if font_path and os.path.exists(font_path):
         available_font = font_path
         break
 
@@ -75,11 +102,17 @@ if available_font:
     try:
         LabelBase.register(name='Chinese', fn_regular=available_font)
         print(f"✅ 已注册中文字体: {available_font}")
+        # 判断是否为等宽字体
+        if 'Mono' in available_font or 'Sarasa' in available_font or 'Consolas' in available_font:
+            print(f"✅ 等宽字体: 中英文严格对齐")
+        else:
+            print(f"⚠️ 普通字体: 可能不对齐")
     except Exception as e:
         print(f"❌ 注册字体失败: {e}")
         available_font = None
 else:
     print("⚠️ 未找到中文字体，中文可能无法显示")
+
 
 # ═══════════════════════════════════════════════════════════════
 # 固定 FTP 配置
