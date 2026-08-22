@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.15
+精简版多标签记事本 - 安卓版 (Kivy) V1.16
 功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
@@ -10,6 +10,7 @@
 - 横竖屏自适应
 - 自带等宽中文字体（Sarasa Mono SC）
 - 编辑器字体大小可调（dp10~dp28）
+- 状态栏显示当前加载的字体
 """
 
 import os
@@ -39,79 +40,97 @@ from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.utils import platform
 from kivy.core.text import LabelBase
+from kivy.resources import resource_find
 
 # ═══════════════════════════════════════════════════════════════
 # 字体配置 - 优先使用打包的等宽字体
 # ═══════════════════════════════════════════════════════════════
 
-# 字体文件路径（相对于项目根目录）
+# 字体文件名
 FONT_FILENAME = 'SarasaMonoSC-Regular.ttf'
 
-# 获取字体文件的绝对路径
 def get_font_path():
-    """获取字体文件路径，支持打包和开发环境"""
-    # 1. 检查当前目录
+    """获取字体路径，优先从 APK 中查找"""
+    # 1. 使用 resource_find（Kivy 推荐方式）
+    font_path = resource_find(FONT_FILENAME)
+    if font_path and os.path.exists(font_path):
+        return font_path
+    
+    # 2. 检查当前目录
     if os.path.exists(FONT_FILENAME):
-        return FONT_FILENAME
-    # 2. 检查用户数据目录（Android 打包后）
-    from kivy.app import App
-    app = App.get_running_app()
-    if app:
-        font_path = os.path.join(app.user_data_dir, FONT_FILENAME)
-        if os.path.exists(font_path):
-            return font_path
-    # 3. 检查当前目录的上级（某些打包场景）
-    for path in ['./', '../', './fonts/', './assets/']:
-        full_path = os.path.join(path, FONT_FILENAME)
-        if os.path.exists(full_path):
-            return full_path
+        return os.path.abspath(FONT_FILENAME)
+    
+    # 3. 检查 user_data_dir
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app:
+            user_path = os.path.join(app.user_data_dir, FONT_FILENAME)
+            if os.path.exists(user_path):
+                return user_path
+    except:
+        pass
+    
     return None
 
-# 字体搜索路径（按优先级）
-CHINESE_FONT_PATHS = [
-    # 1. 打包的等宽字体（最优）
-    get_font_path(),
-    # 2. Android 等宽字体
+# 构建搜索路径列表（按优先级）
+CHINESE_FONT_PATHS = []
+
+# 先添加打包字体（如果有）
+packed_font = get_font_path()
+if packed_font:
+    CHINESE_FONT_PATHS.append(packed_font)
+
+# 再添加系统字体作为回退
+CHINESE_FONT_PATHS.extend([
     '/system/fonts/NotoSansMonoCJK-Regular.ttc',
     '/system/fonts/DroidSansMono.ttf',
-    # 3. Android 普通中文字体（回退）
     '/system/fonts/DroidSansFallback.ttf',
     '/system/fonts/NotoSansCJK-Regular.ttc',
     '/system/fonts/NotoSansSC-Regular.otf',
     '/system/fonts/Roboto-Regular.ttf',
-    # 4. 项目内置其他字体
+    # 项目内置其他字体
     'NotoSansMonoCJK-Regular.ttc',
     'NotoSansCJK-Regular.ttc',
     'DroidSansFallback.ttf',
-    # 5. Windows 字体（PC测试）
+    # Windows 字体（PC测试）
     'C:/Windows/Fonts/Consolas.ttf',
     'C:/Windows/Fonts/simsun.ttc',
     'C:/Windows/Fonts/msyh.ttc',
     'C:/Windows/Fonts/msyhbd.ttc',
     'C:/Windows/Fonts/simhei.ttf',
     'C:/Windows/Fonts/STKAITI.TTF',
-]
+])
+
+# 存储字体加载状态
+FONT_STATUS = ''
 
 available_font = None
 for font_path in CHINESE_FONT_PATHS:
     if font_path and os.path.exists(font_path):
-        available_font = font_path
-        break
+        try:
+            LabelBase.register(name='Chinese', fn_regular=font_path)
+            available_font = font_path
+            # 构建状态信息
+            font_name = os.path.basename(font_path)
+            if 'Mono' in font_path or 'Sarasa' in font_path or 'Consolas' in font_path:
+                FONT_STATUS = f'✅ {font_name} ✓等宽'
+            else:
+                FONT_STATUS = f'✅ {font_name} (比例)'
+            print(f"✅ 已注册中文字体: {font_path}")
+            break
+        except Exception as e:
+            print(f"❌ 注册失败 {font_path}: {e}")
 
-if available_font:
-    try:
-        LabelBase.register(name='Chinese', fn_regular=available_font)
-        print(f"✅ 已注册中文字体: {available_font}")
-        # 判断是否为等宽字体
-        if 'Mono' in available_font or 'Sarasa' in available_font or 'Consolas' in available_font:
-            print(f"✅ 等宽字体: 中英文严格对齐")
-        else:
-            print(f"⚠️ 普通字体: 可能不对齐")
-    except Exception as e:
-        print(f"❌ 注册字体失败: {e}")
-        available_font = None
-else:
+if available_font is None:
+    FONT_STATUS = '⚠️ 无中文字体'
     print("⚠️ 未找到中文字体，中文可能无法显示")
+else:
+    # 判断是否为等宽字体
+    if 'Mono' in available_font or 'Sarasa' in available_font or 'Consolas' in available_font:
+        print(f"✅ 等宽字体: 中英文严格对齐")
+    else:
+        print(f"⚠️ 普通字体: 可能不对齐")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -722,7 +741,7 @@ class MainLayout(BoxLayout):
         self.drag_tab_index = -1
         self.drag_over_index = -1
 
-        # 标题栏 - 最小高度
+        # ===== 标题栏 =====
         title_bar = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0], spacing=dp(4))
         with title_bar.canvas.before:
             Color(*COLORS['tab_bar'])
@@ -745,7 +764,7 @@ class MainLayout(BoxLayout):
         title_bar.add_widget(self.user_label)
         self.add_widget(title_bar)
 
-        # 标签栏 - 最小高度
+        # ===== 标签栏 =====
         self.tab_bar = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(2), padding=[dp(2), 0])
         with self.tab_bar.canvas.before:
             Color(*COLORS['tab_bar'])
@@ -756,11 +775,11 @@ class MainLayout(BoxLayout):
         )
         self.add_widget(self.tab_bar)
 
-        # 内容区
+        # ===== 内容区 =====
         self.content_area = BoxLayout()
         self.add_widget(self.content_area)
 
-        # 状态栏 - 最小高度
+        # ===== 状态栏 =====
         status = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
         with status.canvas.before:
             Color(*COLORS['status'])
@@ -774,7 +793,7 @@ class MainLayout(BoxLayout):
         if available_font:
             self.status_left.font_name = 'Chinese'
         self.status_left.bind(size=self.status_left.setter('text_size'))
-        self.status_right = Label(text='', color=(1, 1, 1, 1), font_size=dp(10),
+        self.status_right = Label(text=FONT_STATUS, color=(1, 1, 1, 1), font_size=dp(10),
                                   halign='right', size_hint_x=0.45)
         if available_font:
             self.status_right.font_name = 'Chinese'
@@ -1031,7 +1050,10 @@ class MainLayout(BoxLayout):
             self.status_left.text = name
         source = getattr(self.app, 'last_loaded_source', '')
         auto = getattr(self.app, 'last_auto_save_msg', '')
-        self.status_right.text = auto or source
+        if auto or source:
+            self.status_right.text = auto or source
+        else:
+            self.status_right.text = FONT_STATUS
 
     def update_all_editor_font_size(self, size):
         """更新所有已打开标签的字体大小"""
