@@ -80,13 +80,16 @@ packed_font = get_font_path()
 if packed_font:
     CHINESE_FONT_PATHS.append(packed_font)
 
-# 再添加系统字体作为回退
+# 再添加系统字体作为回退（优先级从高到低）
 CHINESE_FONT_PATHS.extend([
-    '/system/fonts/NotoSansMonoCJK-Regular.ttc',
-    '/system/fonts/DroidSansMono.ttf',
+    # 1. 中文字体（含中文，优先）
+    '/system/fonts/NotoSansCJK-Regular.ttf',
     '/system/fonts/DroidSansFallback.ttf',
-    '/system/fonts/NotoSansCJK-Regular.ttc',
     '/system/fonts/NotoSansSC-Regular.otf',
+    # 2. 等宽中文字体（含中文，等宽）
+    '/system/fonts/NotoSansMonoCJK-Regular.ttc',
+    # 3. 英文等宽字体（不含中文，最后才用）
+    '/system/fonts/DroidSansMono.ttf',
     '/system/fonts/Roboto-Regular.ttf',
     # 项目内置其他字体
     'NotoSansMonoCJK-Regular.ttc',
