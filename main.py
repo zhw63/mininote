@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.01
+精简版多标签记事本 - 安卓版 (Kivy) V1.03
 功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
@@ -1090,11 +1090,13 @@ class MiniNoteApp(App):
 
     def build(self):
         Window.clearcolor = COLORS['bg']
-        if platform == 'android':
-            pass
+        # ← FIX3: 绑定窗口尺寸变化，自动适配横竖屏切换
+        Window.bind(on_resize=self._on_resize)
         
         self.main_layout = MainLayout(self)
         self._auto_save_event = Clock.schedule_interval(self._auto_save, AUTO_SAVE_INTERVAL)
+        # 延迟一次方向适配，确保窗口尺寸已就绪
+        Clock.schedule_once(lambda dt: self._on_resize(Window, *Window.size), 0.2)
         return self.main_layout
 
     def on_stop(self):
@@ -1108,6 +1110,25 @@ class MiniNoteApp(App):
             return
         self.save_data(silent=True, is_auto=True)
 
+
+    # ← FIX3: 屏幕旋转时自动调整布局（横屏/竖屏适配）
+    def _on_resize(self, window, width, height):
+        if width <= 0 or height <= 0 or not self.main_layout:
+            return
+        is_landscape = width > height
+        # 横屏时增加标签栏高度和标签宽度，提升可用性
+        if is_landscape:
+            self.main_layout.tab_bar.height = dp(42)
+            for tab in self.main_layout.tabs:
+                btn = tab.get('btn')
+                if btn and isinstance(btn, TabButton):
+                    btn.width = dp(140)
+        else:
+            self.main_layout.tab_bar.height = dp(36)
+            for tab in self.main_layout.tabs:
+                btn = tab.get('btn')
+                if btn and isinstance(btn, TabButton):
+                    btn.width = dp(110)
     # ── 设置用户名 ──
 
     def set_username(self):
