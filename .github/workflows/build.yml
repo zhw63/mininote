@@ -44,13 +44,39 @@ jobs:
         pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer
 
-    - name: Pre-download and patch p4a
+    - name: Clone p4a develop branch and patch pip upgrade
       run: |
         mkdir -p .buildozer/android/platform
         rm -rf .buildozer/android/platform/python-for-android
-        git clone --depth 1 https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android
-        sed -i "s/pip install -U pip/pip install 'pip<26'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
-        sed -i "s/pip install --upgrade pip/pip install 'pip<26'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
+        # 使用 develop 分支（GitHub 最新代码）
+        git clone -b develop --depth 1 https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android
+        # 用 Python 精确 patch：把 pip install -U pip 改成 pip install 'pip<26'
+        python3 << 'PYEOF'
+        import re
+        build_py = ".buildozer/android/platform/python-for-android/pythonforandroid/build.py"
+        with open(build_py, "r") as f:
+            content = f.read()
+        # 找到 "pip install -U pip" 并替换
+        patched = re.sub(
+            r"(pip install -U pip)",
+            r"pip install 'pip<26'  # patched: was \1",
+            content
+        )
+        patched = re.sub(
+            r"(pip install --upgrade pip)",
+            r"pip install 'pip<26'  # patched: was \1",
+            patched
+        )
+        with open(build_py, "w") as f:
+            f.write(patched)
+        # 验证 patch 是否成功
+        with open(build_py, "r") as f:
+            for i, line in enumerate(f, 1):
+                if "pip install" in line and "pip<26" in line:
+                    print(f"✅ Patched line {i}: {line.strip()}")
+                elif "pip install -U pip" in line or "pip install --upgrade pip" in line:
+                    print(f"❌ Unpatched line {i}: {line.strip()}")
+        PYEOF
 
     - name: Cache buildozer dependencies
       uses: actions/cache@v4
