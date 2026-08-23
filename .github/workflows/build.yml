@@ -10,89 +10,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: kivy/buildozer:latest
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          git \
-          zip \
-          unzip \
-          openjdk-17-jdk \
-          autoconf \
-          autoconf-archive \
-          libtool \
-          libltdl-dev \
-          pkg-config \
-          zlib1g-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          cmake \
-          libffi-dev \
-          libssl-dev \
-          automake
-
-    - name: Install Buildozer
-      run: |
-        pip install --upgrade pip setuptools wheel
-        pip install --upgrade buildozer
-
-    - name: Clone p4a develop branch and patch pip upgrade
-      run: |
-        mkdir -p .buildozer/android/platform
-        rm -rf .buildozer/android/platform/python-for-android
-        # 使用 develop 分支（GitHub 最新代码）
-        git clone -b develop --depth 1 https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android
-        # 用 Python 精确 patch：把 pip install -U pip 改成 pip install 'pip<26'
-        python3 << 'PYEOF'
-        import re
-        build_py = ".buildozer/android/platform/python-for-android/pythonforandroid/build.py"
-        with open(build_py, "r") as f:
-            content = f.read()
-        # 找到 "pip install -U pip" 并替换
-        patched = re.sub(
-            r"(pip install -U pip)",
-            r"pip install 'pip<26'  # patched: was \1",
-            content
-        )
-        patched = re.sub(
-            r"(pip install --upgrade pip)",
-            r"pip install 'pip<26'  # patched: was \1",
-            patched
-        )
-        with open(build_py, "w") as f:
-            f.write(patched)
-        # 验证 patch 是否成功
-        with open(build_py, "r") as f:
-            for i, line in enumerate(f, 1):
-                if "pip install" in line and "pip<26" in line:
-                    print(f"✅ Patched line {i}: {line.strip()}")
-                elif "pip install -U pip" in line or "pip install --upgrade pip" in line:
-                    print(f"❌ Unpatched line {i}: {line.strip()}")
-        PYEOF
-
-    - name: Cache buildozer dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.buildozer
-          ~/.gradle
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
-        restore-keys: |
-          ${{ runner.os }}-buildozer-
-
     - name: Build APK
-      run: |
-        buildozer android debug
-      env:
-        ANDROID_SDK_HOME: ${{ runner.temp }}/android-sdk
+      run: buildozer android debug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
