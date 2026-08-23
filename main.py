@@ -104,7 +104,7 @@ if font_path:
         LabelBase.register(name='Chinese', fn_regular=font_path)
         available_font = font_path
         font_name = os.path.basename(font_path)
-        if 'mono' in font_path.lower() or 'saras' in font_path.lower() or 'consolas' in font_path.lower():
+        if 'mono' in font_path.lower() or 'sarasa' in font_path.lower() or 'consolas' in font_path.lower():
             FONT_STATUS = f'✅ {font_name} ✓等宽'
         else:
             FONT_STATUS = f'✅ {font_name} (比例)'
@@ -116,32 +116,6 @@ else:
     FONT_STATUS = '⚠️ 无中文字体'
     print("⚠️ 未找到中文字体，中文可能无法显示")
 
-available_font = None
-for font_path in CHINESE_FONT_PATHS:
-    if font_path and os.path.exists(font_path):
-        try:
-            LabelBase.register(name='Chinese', fn_regular=font_path)
-            available_font = font_path
-            # 构建状态信息
-            font_name = os.path.basename(font_path)
-            if 'Mono' in font_path or 'Sarasa' in font_path or 'Consolas' in font_path:
-                FONT_STATUS = f'✅ {font_name} ✓等宽'
-            else:
-                FONT_STATUS = f'✅ {font_name} (比例)'
-            print(f"✅ 已注册中文字体: {font_path}")
-            break
-        except Exception as e:
-            print(f"❌ 注册失败 {font_path}: {e}")
-
-if available_font is None:
-    FONT_STATUS = '⚠️ 无中文字体'
-    print("⚠️ 未找到中文字体，中文可能无法显示")
-else:
-    # 判断是否为等宽字体
-    if 'Mono' in available_font or 'Sarasa' in available_font or 'Consolas' in available_font:
-        print(f"✅ 等宽字体: 中英文严格对齐")
-    else:
-        print(f"⚠️ 普通字体: 可能不对齐")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -927,7 +901,8 @@ class MainLayout(BoxLayout):
         for i, tab in enumerate(self.tabs):
             if tab['btn'] == btn:
                 self.close_tab(i)
-                break
+                return True
+        return True
 
     def show_tab(self, index):
         if index < 0 or index >= len(self.tabs):
