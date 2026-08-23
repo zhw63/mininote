@@ -438,6 +438,51 @@ class TabButton(Button):
 # 文本编辑页 - 支持等宽字体和自定义字体大小
 # ═══════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════
+# 自定义文本输入框 - 取消选择 UI，支持只读模式
+# ═══════════════════════════════════════════════════════════════
+
+class CustomTextInput(TextInput):
+    """取消 Kivy 选择气泡/手柄，只保留光标"""
+    def __init__(self, **kwargs):
+        kwargs.setdefault('use_handles', False)
+        kwargs.setdefault('use_bubble', False)
+        kwargs.setdefault('multiline', True)
+        super().__init__(**kwargs)
+        self.bind(on_selection=self._cancel_selection)
+        self._touch_start = None
+
+    def _cancel_selection(self, instance, value):
+        if self.selection_text:
+            self.cancel_selection()
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return super().on_touch_down(touch)
+
+        if self.readonly:
+            # 只读模式：不消费触摸，让 ScrollView 接管拖动
+            return False
+
+        # 编辑模式：正常放置光标，但立即取消任何选区
+        result = super().on_touch_down(touch)
+        if self.selection_text:
+            self.cancel_selection()
+        return result
+
+    def on_touch_move(self, touch):
+        if self.readonly:
+            return False
+        # 编辑模式下禁止选区拖动
+        if self.selection_text:
+            self.cancel_selection()
+        return super().on_touch_move(touch)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 文本编辑页 - ScrollView 包裹 CustomTextInput
+# ═══════════════════════════════════════════════════════════════
+
 class TextTab(BoxLayout):
     def __init__(self, title='无标题', content='', app_ref=None, font_size=None, readonly=False, **kwargs):
         # 先提取自定义参数，不让它们传给 Kivy Widget
@@ -453,24 +498,58 @@ class TextTab(BoxLayout):
         self.font_size = self._init_font_size
 
         actual_font_size = self._get_effective_font_size()
-
         bg_color = (0.12, 0.13, 0.15, 1) if self.readonly else COLORS['bg']
+        cursor_color = (0, 0, 0, 0) if self.readonly else COLORS['accent']
 
-        self.text_input = TextInput(
+        self.text_input = CustomTextInput(
             text=content,
-            multiline=True,
             background_color=bg_color,
             foreground_color=COLORS['text'],
-            cursor_color=COLORS['accent'],
+            cursor_color=cursor_color,
             font_size=dp(actual_font_size),
             padding=[dp(10), dp(8)],
             hint_text='在此输入文本...',
             hint_text_color=COLORS['hint'],
             readonly=self.readonly,
+            size_hint_y=None,
         )
         if available_font:
             self.text_input.font_name = 'Chinese'
-        self.add_widget(self.text_input)
+
+        # 高度随内容自动扩展
+        self.text_input.bind(text=self._update_input_height)
+        self.text_input.bind(width=self._update_input_height)
+
+        self.scroll_view = ScrollView(
+            do_scroll_x=False,
+            bar_width=dp(6),
+            bar_color=(*COLORS['accent'][:3], 0.7),
+            bar_inactive_color=(*COLORS['accent'][:3], 0.2),
+            scroll_type=['bars', 'content'],
+        )
+        self.scroll_view.add_widget(self.text_input)
+        self.add_widget(self.scroll_view)
+
+        # 延迟初始化高度
+        Clock.schedule_once(self._update_input_height, 0)
+
+    def _update_input_height(self, *args):
+        """根据内容行数更新 TextInput 高度"""
+        ti = self.text_input
+        labels = getattr(ti, '_lines_labels', None)
+        if labels:
+            total = sum(l.height for l in labels)
+        else:
+            line_count = max(ti.text.count('\n') + 1, 1)
+            total = line_count * ti.line_height
+
+        # padding 是 [left, top, right, bottom] 列表
+        pad_top = ti.padding[1] if len(ti.padding) >= 4 else dp(8)
+        pad_bottom = ti.padding[3] if len(ti.padding) >= 4 else dp(8)
+        padding = pad_top + pad_bottom
+        new_height = total + padding
+        min_h = self.scroll_view.height if self.scroll_view else dp(300)
+        ti.height = max(new_height, min_h)
 
     def _get_effective_font_size(self):
         """获取实际生效的字体大小"""
@@ -491,11 +570,14 @@ class TextTab(BoxLayout):
         self.font_size = size
         actual = self._get_effective_font_size()
         self.text_input.font_size = dp(actual)
+        Clock.schedule_once(self._update_input_height, 0.1)
 
     def set_readonly(self, readonly):
         """切换只读状态"""
         self.readonly = readonly
         self.text_input.readonly = readonly
+        # 只读时隐藏光标，编辑时恢复
+        self.text_input.cursor_color = (0, 0, 0, 0) if readonly else COLORS['accent']
         # 只读时改变背景色提示用户
         if readonly:
             self.text_input.background_color = (0.12, 0.13, 0.15, 1)
