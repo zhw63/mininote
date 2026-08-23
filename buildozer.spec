@@ -1,25 +1,20 @@
 [app]
-title = 精简记事本
+
+title = Mini Note
 package.name = mininote
-package.domain = org.example
+package.domain = com.zhw63.mininote
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,ttc,otf
-source.include_patterns = *.ttf,*.ttc,*.otf
-version = 1.17
-requirements = python3,kivy,hostpython3
+source.include_exts = py,png,jpg,kv,atlas,ttf,ttc,otf,txt,json
+version = 1.0.0
+requirements = python3,kivy
 orientation = all
 fullscreen = 0
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,ACCESS_NETWORK_STATE
 android.api = 33
 android.minapi = 21
-android.ndk = 25b
-android.sdk = 33
-android.archs = arm64-v8a,armeabi-v7a
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-android.logcat_filters = *:S python:D
-android.accept_sdk_license = True
-
-# 关键：禁用 buildozer 自动更新 p4a，防止 patch 被覆盖
-p4a.update = False
+android.archs = arm64-v8a, armeabi-v7a
+android.allow_backup = False
+p4a.branch = v2024.01.21
 
 [buildozer]
 log_level = 2
