@@ -12,6 +12,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: Accept SDK Licenses manually
+        run: |
+          yes | sdkmanager --licenses || true
+          yes | sdkmanager "build-tools;33.0.0" "platforms;android-33" || true
+
       - name: Build APK
         uses: digreatbrian/buildozer-action@v2
         with:
