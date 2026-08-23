@@ -443,40 +443,50 @@ class TabButton(Button):
 # ═══════════════════════════════════════════════════════════════
 
 class CustomTextInput(TextInput):
-    """取消 Kivy 选择气泡/手柄，只保留光标"""
+    """彻底禁用文本选择，只保留光标；触摸事件不阻止 ScrollView 滚动"""
     def __init__(self, **kwargs):
         kwargs.setdefault('use_handles', False)
         kwargs.setdefault('use_bubble', False)
         kwargs.setdefault('multiline', True)
         super().__init__(**kwargs)
-        self.bind(on_selection=self._cancel_selection)
-        self._touch_start = None
 
-    def _cancel_selection(self, instance, value):
-        if self.selection_text:
-            self.cancel_selection()
+    # ── 彻底禁止任何选区建立 ──
+    def select_text(self, start, end):
+        pass
+
+    def on_double_tap(self):
+        pass
+
+    def on_triple_tap(self):
+        pass
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
-            return super().on_touch_down(touch)
-
-        if self.readonly:
-            # 只读模式：不消费触摸，让 ScrollView 接管拖动
             return False
 
-        # 编辑模式：正常放置光标，但立即取消任何选区
-        result = super().on_touch_down(touch)
-        if self.selection_text:
-            self.cancel_selection()
-        return result
+        if self.readonly:
+            # 只读模式：完全交给 ScrollView，不建立光标
+            return False
+
+        # 编辑模式：调用父类放光标，然后取消选区、释放 grab
+        super().on_touch_down(touch)
+        self.cancel_selection()
+        # 释放 touch grab，让 ScrollView 可以接管滚动
+        if touch.grab_current is self:
+            touch.ungrab(self)
+        return False  # 事件继续传播，ScrollView 可滚动
 
     def on_touch_move(self, touch):
         if self.readonly:
             return False
-        # 编辑模式下禁止选区拖动
-        if self.selection_text:
-            self.cancel_selection()
-        return super().on_touch_move(touch)
+        # 编辑模式：不处理移动，交给 ScrollView 滚动
+        return False
+
+    def on_touch_up(self, touch):
+        if self.readonly:
+            return False
+        self.cancel_selection()
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════
