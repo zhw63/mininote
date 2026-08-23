@@ -27,7 +27,9 @@ jobs:
           unzip \
           openjdk-17-jdk \
           autoconf \
+          autoconf-archive \
           libtool \
+          libltdl-dev \
           pkg-config \
           zlib1g-dev \
           libncurses5-dev \
