@@ -10,13 +10,84 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: kivy/buildozer:latest
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          zip \
+          unzip \
+          openjdk-17-jdk \
+          autoconf \
+          autoconf-archive \
+          libtool \
+          libltdl-dev \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          cmake \
+          libffi-dev \
+          libssl-dev \
+          automake
+
+    - name: Install Buildozer
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer
+
+    - name: Clone stable p4a and patch pip upgrade
+      run: |
+        P4A_DIR=".buildozer/android/platform/python-for-android"
+        rm -rf "$P4A_DIR"
+        mkdir -p "$(dirname "$P4A_DIR")"
+        # 使用稳定版本 v2024.01.21（已验证可用）
+        git clone --branch v2024.01.21 --depth 1 https://github.com/kivy/python-for-android.git "$P4A_DIR"
+
+        # 精确 patch：阻止 pip 升级到 26.x
+        python3 << 'EOF'
+        import os
+        build_py = os.path.join(os.environ["P4A_DIR"], "pythonforandroid/build.py")
+
+        with open(build_py, "r") as f:
+            content = f.read()
+
+        original = content
+        content = content.replace("pip install -U pip", "pip install 'pip<26'")
+        content = content.replace("pip install --upgrade pip", "pip install 'pip<26'")
+
+        if content == original:
+            print("WARNING: No pip upgrade line found (may be already fixed)")
+        else:
+            print("✅ Patched pip upgrade line")
+
+        with open(build_py, "w") as f:
+            f.write(content)
+
+        # 验证
+        with open(build_py, "r") as f:
+            text = f.read()
+        if "pip install -U pip" in text or "pip install --upgrade pip" in text:
+            print("ERROR: Patch failed!")
+            exit(1)
+        print("✅ Patch verification passed")
+        EOF
+      env:
+        P4A_DIR: .buildozer/android/platform/python-for-android
+
     - name: Build APK
-      run: buildozer android debug
+      run: |
+        buildozer android debug
+      env:
+        ANDROID_SDK_HOME: ${{ runner.temp }}/android-sdk
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
