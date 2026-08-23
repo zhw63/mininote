@@ -18,6 +18,9 @@ android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 android.logcat_filters = *:S python:D
 android.accept_sdk_license = True
 
+# 关键：禁用 buildozer 自动更新 p4a，防止 patch 被覆盖
+p4a.update = False
+
 [buildozer]
 log_level = 2
 warn_on_root = 1
