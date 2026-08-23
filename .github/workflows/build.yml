@@ -39,21 +39,18 @@ jobs:
           libssl-dev \
           automake
 
-    - name: Install Buildozer and python-for-android
+    - name: Install Buildozer
       run: |
         pip install --upgrade pip setuptools wheel
         pip install --upgrade buildozer
-        pip install --upgrade "python-for-android>=2024.01.21"
 
-    - name: Patch p4a pip upgrade (fallback)
+    - name: Pre-download and patch p4a
       run: |
-        P4A_PATH=$(python -c "import pythonforandroid; print(pythonforandroid.__path__[0])")
-        if [ -f "$P4A_PATH/build.py" ]; then
-          sed -i "s/pip install -U pip/pip install 'pip<26'/g" "$P4A_PATH/build.py" || true
-        fi
-        if [ -f "$P4A_PATH/toolchain.py" ]; then
-          sed -i "s/pip install -U pip/pip install 'pip<26'/g" "$P4A_PATH/toolchain.py" || true
-        fi
+        mkdir -p .buildozer/android/platform
+        rm -rf .buildozer/android/platform/python-for-android
+        git clone --depth 1 https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android
+        sed -i "s/pip install -U pip/pip install 'pip<26'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
+        sed -i "s/pip install --upgrade pip/pip install 'pip<26'/g" .buildozer/android/platform/python-for-android/pythonforandroid/build.py
 
     - name: Cache buildozer dependencies
       uses: actions/cache@v4
