@@ -47,6 +47,7 @@ FONT_FALLBACK = 'NotoSansCJKsc-Regular.otf'
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 resource_add_path(_script_dir)
 
+
 def get_font_path():
     candidates = [
         resource_find(FONT_FILENAME),
@@ -80,6 +81,7 @@ def get_font_path():
             return path
     return None
 
+
 FONT_STATUS = ""
 available_font = None
 
@@ -109,6 +111,7 @@ AUTO_SAVE_INTERVAL = 5.0
 
 DOWNLOAD_DIR = '/storage/emulated/0/fileshare/notefile'
 
+
 def save_password(password):
     try:
         with open(PASSWORD_FILE, "w", encoding="utf-8") as f:
@@ -117,6 +120,7 @@ def save_password(password):
     except Exception as e:
         print(f"保存密码失败: {e}")
         return False
+
 
 def load_password():
     try:
@@ -127,57 +131,70 @@ def load_password():
         print(f"加载密码失败: {e}")
     return ""
 
+
 def has_password():
     return bool(load_password())
+
 
 def get_ftp():
     password = load_password()
     if not password:
         raise Exception("请先设置FTP密码")
     ftp = FTP()
-    ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
-    ftp.login(FTP_USER, password)
-    return ftp
+    try:
+        ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
+        ftp.login(FTP_USER, password)
+        return ftp
+    except Exception as e:
+        try:
+            ftp.quit()
+        except Exception:
+            pass
+        raise
+
 
 def ftp_upload_json(data_str, filename):
+    ftp = None
     try:
         ftp = get_ftp()
         bio = io.BytesIO(data_str.encode("utf-8"))
         ftp.storbinary(f"STOR {filename}", bio)
-        ftp.quit()
         return True
     except Exception as e:
         print(f"FTP 上传失败: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return False
+    finally:
+        if ftp:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
 
 def ftp_download_json(filename):
+    ftp = None
     try:
         ftp = get_ftp()
         bio = io.BytesIO()
         ftp.retrbinary(f"RETR {filename}", bio.write)
-        ftp.quit()
         return bio.getvalue().decode("utf-8")
     except error_perm as e:
         if "550" not in str(e):
             print(f"FTP 下载失败: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return None
     except Exception as e:
         print(f"FTP 下载失败: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return None
+    finally:
+        if ftp:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
 
 def ftp_upload_file(local_path, remote_dir="files"):
+    ftp = None
     try:
         ftp = get_ftp()
         try:
@@ -189,21 +206,25 @@ def ftp_upload_file(local_path, remote_dir="files"):
         safe_filename = urllib.parse.quote(filename, safe="")
         with open(local_path, "rb") as f:
             ftp.storbinary(f"STOR {safe_filename}", f)
-        ftp.quit()
         return True
     except Exception as e:
         print(f"FTP 上传文件失败: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return False
+    finally:
+        if ftp:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
 
 def ftp_list_files(remote_dir="files"):
+    ftp = None
     try:
         ftp = get_ftp()
         ftp.cwd(remote_dir)
         files = []
+
         def parse_line(line):
             parts = line.split()
             if len(parts) >= 9:
@@ -218,33 +239,39 @@ def ftp_list_files(remote_dir="files"):
                 except Exception:
                     display_name = name
                 files.append((name, display_name, size))
+
         ftp.retrlines("LIST", parse_line)
-        ftp.quit()
         return files
     except Exception as e:
         print(f"FTP 列出文件失败: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return []
+    finally:
+        if ftp:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
 
 def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
+    ftp = None
     try:
         ftp = get_ftp()
         ftp.cwd(remote_dir)
         with open(local_path, "wb") as f:
             ftp.retrbinary(f"RETR {remote_name}", f.write)
         ftp.delete(remote_name)
-        ftp.quit()
         return True
     except Exception as e:
         print(f"FTP 下载删除失败 {remote_name}: {e}")
-        try:
-            ftp.quit()
-        except Exception:
-            pass
         return False
+    finally:
+        if ftp:
+            try:
+                ftp.quit()
+            except Exception:
+                pass
+
 
 def format_size(size):
     if size < 1024:
@@ -253,6 +280,7 @@ def format_size(size):
         return f"{size / 1024:.1f} KB"
     else:
         return f"{size / (1024 * 1024):.2f} MB"
+
 
 COLORS = {
     'bg': (0.157, 0.173, 0.204, 1),
@@ -269,6 +297,7 @@ COLORS = {
     'success': (0.3, 0.8, 0.3, 1),
 }
 
+
 class DarkButton(Button):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -280,6 +309,7 @@ class DarkButton(Button):
         self.height = dp(20)
         if available_font:
             self.font_name = "Chinese"
+
 
 class TabButton(Button):
     def __init__(self, title="", active=False, index=0, **kwargs):
@@ -379,6 +409,7 @@ class TabButton(Button):
         if parent and hasattr(parent, "close_tab_by_btn"):
             parent.close_tab_by_btn(self)
 
+
 class BetterTextInput(TextInput):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -409,6 +440,7 @@ class BetterTextInput(TextInput):
         self._touch_start = None
         self._is_scrolling = False
         return super().on_touch_up(touch)
+
 
 class TextTab(BoxLayout):
     def __init__(self, title="无标题", content="", app_ref=None, font_size=None, readonly=False, **kwargs):
@@ -559,6 +591,7 @@ class TextTab(BoxLayout):
         if not self.readonly and self.text_input.selection_text:
             self.text_input.delete_selection()
 
+
 class TransferTab(BoxLayout):
     def __init__(self, app_ref, **kwargs):
         super().__init__(**kwargs)
@@ -666,7 +699,6 @@ class TransferTab(BoxLayout):
         ]:
             if os.path.isdir(p):
                 b = DarkButton(text=name, size_hint_x=None, width=dp(80), height=dp(24), font_size=dp(10))
-                # Use chr(10) instead of \n to avoid escape issues
                 b.bind(on_press=lambda inst, path=p: path_input.insert_text(path + "/" + chr(10)))
                 quick.add_widget(b)
         content.add_widget(quick)
@@ -777,11 +809,11 @@ class TransferTab(BoxLayout):
                 success += 1
             else:
                 fail += 1
-        # Use chr(10) instead of \n
         msg = f"下载完成: {success} 成功" + (f", {fail} 失败" if fail else "")
         self.app_ref.show_message(msg + chr(10) + f"保存到: {download_dir}")
         self.app_ref.update_status(msg)
         self.refresh_server()
+
 
 class MainLayout(BoxLayout):
     def __init__(self, app, **kwargs):
@@ -982,7 +1014,7 @@ class MainLayout(BoxLayout):
         new_state = not widget.readonly
         widget.set_readonly(new_state)
         self.update_readonly_btn()
-        self.update_status(f"{"已设为只读" if new_state else "已恢复编辑"}: {tab["title"]}")
+        self.update_status(f"{'已设为只读' if new_state else '已恢复编辑'}: {tab['title']}")
 
     def update_readonly_btn(self):
         if not hasattr(self, "readonly_btn"):
@@ -1046,7 +1078,7 @@ class MainLayout(BoxLayout):
             content = tab["widget"].get_content().strip()
             if content:
                 self.app.confirm(
-                    f"标签「{tab["title"]}」有内容，关闭后将丢失。确定关闭？",
+                    f"标签「{tab['title']}」有内容，关闭后将丢失。确定关闭？",
                     on_yes=lambda: self._do_close(index),
                 )
                 return
@@ -1082,6 +1114,7 @@ class MainLayout(BoxLayout):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def on_ok(*a):
             name = ti.text.strip()
             if name:
@@ -1089,6 +1122,7 @@ class MainLayout(BoxLayout):
                 self.refresh_tab_bar()
                 self.update_status(f"已重命名: {name}")
             popup.dismiss()
+
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
         popup.open()
@@ -1146,6 +1180,7 @@ class MainLayout(BoxLayout):
             if tab["type"] == "text":
                 if tab["widget"].font_size is None:
                     tab["widget"].set_font_size(None)
+
 
 class MiniNoteApp(App):
     def __init__(self, **kwargs):
@@ -1207,11 +1242,14 @@ class MiniNoteApp(App):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def on_slider_change(instance, value):
             size = int(value)
             lbl.text = f"当前字体大小: {size}"
             preview.font_size = dp(size)
+
         slider.bind(value=on_slider_change)
+
         def on_ok(*a):
             size = int(slider.value)
             self.editor_font_size = size
@@ -1220,6 +1258,7 @@ class MiniNoteApp(App):
             self.update_status(f"字体大小已设为: {size}")
             self.save_data(silent=True)
             popup.dismiss()
+
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
         popup.open()
@@ -1237,7 +1276,7 @@ class MiniNoteApp(App):
         is_inherited = widget.font_size is None
         content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
         lbl = Label(
-            text=f"当前标签: {tab["title"]} ({"继承全局" if is_inherited else "独立设置"})",
+            text=f"当前标签: {tab['title']} ({'继承全局' if is_inherited else '独立设置'})",
             color=COLORS["text"], font_size=dp(14), size_hint_y=None, height=dp(40),
         )
         if available_font:
@@ -1281,21 +1320,26 @@ class MiniNoteApp(App):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def on_slider_change(instance, value):
             size = int(value)
-            lbl.text = f"当前标签: {tab["title"]} (独立设置: {size})"
+            lbl.text = f"当前标签: {tab['title']} (独立设置: {size})"
             preview.font_size = dp(size)
+
         slider.bind(value=on_slider_change)
+
         def on_reset(*a):
             widget.set_font_size(None)
-            self.update_status(f"已恢复全局字体: {tab["title"]}")
+            self.update_status(f"已恢复全局字体: {tab['title']}")
             popup.dismiss()
+
         def on_ok(*a):
             size = int(slider.value)
             widget.set_font_size(size)
-            self.update_status(f"字体大小已设为: {size} ({tab["title"]}")
+            self.update_status(f"字体大小已设为: {size} ({tab['title']})")
             self.save_data(silent=True)
             popup.dismiss()
+
         reset_btn.bind(on_press=on_reset)
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
@@ -1378,7 +1422,6 @@ class MiniNoteApp(App):
 
     def set_username(self):
         content = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(12))
-        # Use chr(10) for newline in hint text
         lbl = Label(
             text="用户名决定保存文件名（用户名.note）" + chr(10) + "设置后优先从服务器加载",
             color=COLORS["hint"], font_size=dp(13), size_hint_y=None, height=dp(50),
@@ -1404,6 +1447,7 @@ class MiniNoteApp(App):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def on_ok(*a):
             name = ti.text.strip()
             if name:
@@ -1413,6 +1457,7 @@ class MiniNoteApp(App):
                 self.load_data()
             else:
                 self.show_message("用户名不能为空")
+
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
         popup.open()
@@ -1438,7 +1483,7 @@ class MiniNoteApp(App):
             ti.font_name = "Chinese"
         content.add_widget(ti)
         status_hint = Label(
-            text=f"当前状态: {"✅ 已设置密码" if current_password else "❌ 未设置密码"}",
+            text=f"当前状态: {'✅ 已设置密码' if current_password else '❌ 未设置密码'}",
             color=COLORS["success"] if current_password else COLORS["danger"],
             font_size=dp(12), size_hint_y=None, height=dp(24),
         )
@@ -1469,6 +1514,7 @@ class MiniNoteApp(App):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def test_connection(*a):
             password = ti.text.strip()
             if not password:
@@ -1487,6 +1533,7 @@ class MiniNoteApp(App):
             except Exception as e:
                 status_label.text = f"❌ 连接失败: {str(e)[:40]}"
                 status_label.color = COLORS["danger"]
+
         def save_password_and_close(*a):
             password = ti.text.strip()
             if save_password(password):
@@ -1506,6 +1553,7 @@ class MiniNoteApp(App):
             else:
                 status_label.text = "❌ 操作失败"
                 status_label.color = COLORS["danger"]
+
         def clear_password_and_close(*a):
             if save_password(""):
                 status_label.text = "✅ 密码已清除"
@@ -1517,6 +1565,7 @@ class MiniNoteApp(App):
             else:
                 status_label.text = "❌ 清除失败"
                 status_label.color = COLORS["danger"]
+
         test_btn.bind(on_press=test_connection)
         save_btn.bind(on_press=save_password_and_close)
         clear_btn.bind(on_press=clear_password_and_close)
@@ -1756,13 +1805,16 @@ class MiniNoteApp(App):
                       background_color=COLORS["bg"], title_color=COLORS["text"])
         if available_font:
             popup.title_font = "Chinese"
+
         def yes(*a):
             popup.dismiss()
             if on_yes:
                 on_yes()
+
         no_btn.bind(on_press=popup.dismiss)
         yes_btn.bind(on_press=yes)
         popup.open()
+
 
 if __name__ == "__main__":
     MiniNoteApp().run()
