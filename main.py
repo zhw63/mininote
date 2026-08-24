@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.18
+精简版多标签记事本 - 安卓版 (Kivy) V1.19
 功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
 - 用户名决定文件名（用户名.note）
 - 优先从服务器加载，失败则加载本地
@@ -10,8 +10,9 @@
 - 横竖屏自适应
 - 编辑器字体大小可调（dp10~dp28）
 - 状态栏显示当前加载的字体
-- 用户名左，按钮右
-- 固定下载目录: /storage/emulated/0/Download_note
+- 固定下载目录: /storage/emulated/0/fileshare/notefile
+- ScrollView + 智能触摸分流 实现流畅滚动
+- 文本块操作工具栏（全选/复制/剪切/粘贴/删除）
 """
 
 import os
@@ -23,9 +24,6 @@ import urllib.parse
 from ftplib import FTP, error_perm
 from functools import partial
 
-# ═══════════════════════════════════════════════════════════════
-# Kivy 导入
-# ═══════════════════════════════════════════════════════════════
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -43,18 +41,13 @@ from kivy.utils import platform
 from kivy.core.text import LabelBase
 from kivy.resources import resource_find, resource_add_path
 
-# ═══════════════════════════════════════════════════════════════
-# 字体配置
-# ═══════════════════════════════════════════════════════════════
-
-FONT_FILENAME = 'SarasaMonoSC-Regular.ttf'
+FONT_FILENAME = 'SCsarasa-mono-sc-regular.ttf'
 FONT_FALLBACK = 'NotoSansCJKsc-Regular.otf'
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 resource_add_path(_script_dir)
 
 def get_font_path():
-    """获取字体路径，兼容 PC 和 Android APK"""
     candidates = [
         resource_find(FONT_FILENAME),
         resource_find(FONT_FALLBACK),
@@ -63,7 +56,6 @@ def get_font_path():
         os.path.abspath(FONT_FILENAME),
         os.path.abspath(FONT_FALLBACK),
     ]
-    
     if platform == 'android':
         pkg = os.environ.get("PYTHON_NAME", "org.example.mininote")
         candidates.append(f'/data/data/{pkg}/files/app/{FONT_FILENAME}')
@@ -74,7 +66,6 @@ def get_font_path():
             candidates.append(os.path.join(app_storage_path(), FONT_FALLBACK))
         except Exception:
             pass
-    
     try:
         from kivy.app import App
         app = App.get_running_app()
@@ -83,10 +74,9 @@ def get_font_path():
             candidates.append(os.path.join(app.user_data_dir, FONT_FALLBACK))
     except Exception:
         pass
-    
     for path in candidates:
         if path and os.path.exists(path):
-            print(f"✅ 找到字体: {path}")
+            print(f"找到字体: {path}")
             return path
     return None
 
@@ -103,17 +93,13 @@ if font_path:
             FONT_STATUS = f'✅ {font_name} ✓等宽'
         else:
             FONT_STATUS = f'✅ {font_name} (比例)'
-        print(f"✅ 已注册中文字体: {font_path}")
+        print(f"已注册中文字体: {font_path}")
     except Exception as e:
         FONT_STATUS = f'⚠️ 字体注册失败: {e}'
-        print(f"❌ 注册失败: {e}")
+        print(f"注册失败: {e}")
 else:
     FONT_STATUS = '⚠️ 无中文字体'
-    print("⚠️ 未找到中文字体，中文可能无法显示")
-
-# ═══════════════════════════════════════════════════════════════
-# FTP 配置
-# ═══════════════════════════════════════════════════════════════
+    print("未找到中文字体，中文可能无法显示")
 
 FTP_HOST = '014.3vftp.cn'
 FTP_PORT = 3535
@@ -121,13 +107,7 @@ FTP_USER = 'zhw63'
 PASSWORD_FILE = 'ftp_password.txt'
 AUTO_SAVE_INTERVAL = 5.0
 
-# 固定下载目录（硬编码）
-DOWNLOAD_DIR = '/storage/emulated/0/Download_note'
-
-
-# ═══════════════════════════════════════════════════════════════
-# 密码管理
-# ═══════════════════════════════════════════════════════════════
+DOWNLOAD_DIR = '/storage/emulated/0/fileshare/notefile'
 
 def save_password(password):
     try:
@@ -149,11 +129,6 @@ def load_password():
 
 def has_password():
     return bool(load_password())
-
-
-# ═══════════════════════════════════════════════════════════════
-# FTP 工具函数
-# ═══════════════════════════════════════════════════════════════
 
 def get_ftp():
     password = load_password()
@@ -229,7 +204,6 @@ def ftp_list_files(remote_dir='files'):
         ftp = get_ftp()
         ftp.cwd(remote_dir)
         files = []
-
         def parse_line(line):
             parts = line.split()
             if len(parts) >= 9:
@@ -244,7 +218,6 @@ def ftp_list_files(remote_dir='files'):
                 except Exception:
                     display_name = name
                 files.append((name, display_name, size))
-
         ftp.retrlines('LIST', parse_line)
         ftp.quit()
         return files
@@ -281,11 +254,6 @@ def format_size(size):
     else:
         return f'{size / (1024 * 1024):.2f} MB'
 
-
-# ═══════════════════════════════════════════════════════════════
-# 颜色
-# ═══════════════════════════════════════════════════════════════
-
 COLORS = {
     'bg': (0.157, 0.173, 0.204, 1),
     'tab_bar': (0.145, 0.145, 0.149, 1),
@@ -301,7 +269,6 @@ COLORS = {
     'success': (0.3, 0.8, 0.3, 1),
 }
 
-
 class DarkButton(Button):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -312,8 +279,7 @@ class DarkButton(Button):
         self.size_hint_y = None
         self.height = dp(20)
         if available_font:
-            self.font_name = available_font
-
+            self.font_name = 'Chinese'
 
 class TabButton(Button):
     def __init__(self, title='', active=False, index=0, **kwargs):
@@ -332,7 +298,7 @@ class TabButton(Button):
         self.long_press_triggered = False
         self.long_press_delay = 0.8
         if available_font:
-            self.font_name = available_font
+            self.font_name = 'Chinese'
         self.set_active(active)
 
     def set_active(self, active):
@@ -387,11 +353,9 @@ class TabButton(Button):
         if self.long_press_event:
             self.long_press_event.cancel()
             self.long_press_event = None
-        
         if self.dragging:
             self.dragging = False
             self.drag_start = None
-            
             if self.is_dragging:
                 self.is_dragging = False
                 self._drag_started = False
@@ -401,13 +365,10 @@ class TabButton(Button):
                 if parent and hasattr(parent, 'end_drag'):
                     parent.end_drag(self, touch)
                 return True
-            
             if self.long_press_triggered:
                 return True
-            
             result = super().on_touch_up(touch)
             return result
-        
         return super().on_touch_up(touch)
 
     def _on_long_press(self, dt):
@@ -418,10 +379,36 @@ class TabButton(Button):
         if parent and hasattr(parent, 'close_tab_by_btn'):
             parent.close_tab_by_btn(self)
 
+class BetterTextInput(TextInput):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._touch_start = None
+        self._is_scrolling = False
 
-# ═══════════════════════════════════════════════════════════════
-# 文本编辑页 - 使用 TextInput 原生滚动
-# ═══════════════════════════════════════════════════════════════
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        self._touch_start = touch.pos
+        self._is_scrolling = False
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if self._touch_start is None or self._is_scrolling:
+            return False
+        dx = abs(touch.pos[0] - self._touch_start[0])
+        dy = abs(touch.pos[1] - self._touch_start[1])
+        if dy > dp(12) and dy > dx:
+            self._is_scrolling = True
+            self.cancel_selection()
+            if touch.grab_current is self:
+                touch.ungrab(self)
+            return False
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        self._touch_start = None
+        self._is_scrolling = False
+        return super().on_touch_up(touch)
 
 class TextTab(BoxLayout):
     def __init__(self, title='无标题', content='', app_ref=None, font_size=None, readonly=False, **kwargs):
@@ -435,12 +422,49 @@ class TextTab(BoxLayout):
         self.readonly = self._init_readonly
         self.font_size = self._init_font_size
 
+        self.toolbar = BoxLayout(
+            size_hint_y=None, height=dp(32),
+            spacing=dp(4), padding=[dp(4), dp(2)],
+        )
+        with self.toolbar.canvas.before:
+            Color(*COLORS['tab_bar'])
+            self._toolbar_bg = Rectangle(pos=self.toolbar.pos, size=self.toolbar.size)
+        self.toolbar.bind(
+            pos=lambda *a: setattr(self._toolbar_bg, 'pos', self.toolbar.pos),
+            size=lambda *a: setattr(self._toolbar_bg, 'size', self.toolbar.size),
+        )
+
+        btn_defs = [
+            ('全选', self._do_select_all),
+            ('复制', self._do_copy),
+            ('剪切', self._do_cut),
+            ('粘贴', self._do_paste),
+            ('删除', self._do_delete),
+        ]
+        for text, cb in btn_defs:
+            btn = DarkButton(
+                text=text, size_hint_x=None, width=dp(52),
+                height=dp(24), font_size=dp(10),
+            )
+            btn.bind(on_press=lambda inst, c=cb: c())
+            setattr(self, f'btn_{text}', btn)
+            self.toolbar.add_widget(btn)
+
+        self.add_widget(self.toolbar)
+
         actual_font_size = self._get_effective_font_size()
         bg_color = (0.12, 0.13, 0.15, 1) if self.readonly else COLORS['bg']
         cursor_color = (0, 0, 0, 0) if self.readonly else COLORS['accent']
 
-        # 直接使用 TextInput，原生支持滚动和多行
-        self.text_input = TextInput(
+        self.scroll_view = ScrollView(
+            do_scroll_x=False,
+            bar_width=dp(6),
+            bar_color=(*COLORS['accent'][:3], 0.7),
+            bar_inactive_color=(*COLORS['accent'][:3], 0.2),
+            scroll_type=['bars', 'content'],
+        )
+
+        self.text_input = BetterTextInput(
             text=content,
             multiline=True,
             background_color=bg_color,
@@ -451,15 +475,36 @@ class TextTab(BoxLayout):
             hint_text='在此输入文本...',
             hint_text_color=COLORS['hint'],
             readonly=self.readonly,
-            size_hint=(1, 1),  # 填满父容器
+            size_hint_y=None,
         )
         if available_font:
-            self.text_input.font_name = available_font
+            self.text_input.font_name = 'Chinese'
 
-        self.add_widget(self.text_input)
+        self.text_input.bind(text=self._update_input_height)
+        self.text_input.bind(width=self._update_input_height)
+
+        self.scroll_view.add_widget(self.text_input)
+        self.add_widget(self.scroll_view)
+
+        Clock.schedule_once(self._update_input_height, 0)
+        self._update_toolbar_state()
+
+    def _update_input_height(self, *args):
+        ti = self.text_input
+        labels = getattr(ti, '_lines_labels', None)
+        if labels:
+            total = sum(l.height for l in labels)
+        else:
+            line_count = max(ti.text.count('\n') + 1, 1)
+            total = line_count * ti.line_height
+        pad_top = ti.padding[1] if len(ti.padding) >= 4 else dp(8)
+        pad_bottom = ti.padding[3] if len(ti.padding) >= 4 else dp(8)
+        padding = pad_top + pad_bottom
+        new_height = total + padding
+        min_h = self.scroll_view.height if self.scroll_view else dp(300)
+        ti.height = max(new_height, min_h)
 
     def _get_effective_font_size(self):
-        """获取实际生效的字体大小"""
         if self.font_size is not None:
             return self.font_size
         if self.app_ref and hasattr(self.app_ref, 'editor_font_size'):
@@ -473,13 +518,12 @@ class TextTab(BoxLayout):
         self.text_input.text = content
 
     def set_font_size(self, size):
-        """设置当前标签独立的字体大小（None 表示继承全局）"""
         self.font_size = size
         actual = self._get_effective_font_size()
         self.text_input.font_size = dp(actual)
+        Clock.schedule_once(self._update_input_height, 0.1)
 
     def set_readonly(self, readonly):
-        """切换只读状态"""
         self.readonly = readonly
         self.text_input.readonly = readonly
         self.text_input.cursor_color = (0, 0, 0, 0) if readonly else COLORS['accent']
@@ -487,11 +531,33 @@ class TextTab(BoxLayout):
             self.text_input.background_color = (0.12, 0.13, 0.15, 1)
         else:
             self.text_input.background_color = COLORS['bg']
+        self._update_toolbar_state()
 
+    def _update_toolbar_state(self):
+        ro = self.readonly
+        for name in ['剪切', '粘贴', '删除']:
+            btn = getattr(self, f'btn_{name}', None)
+            if btn:
+                btn.disabled = ro
+                btn.opacity = 0.4 if ro else 1
 
-# ═══════════════════════════════════════════════════════════════
-# 传输页
-# ═══════════════════════════════════════════════════════════════
+    def _do_select_all(self, *a):
+        self.text_input.select_all()
+
+    def _do_copy(self, *a):
+        self.text_input.copy()
+
+    def _do_cut(self, *a):
+        if not self.readonly:
+            self.text_input.cut()
+
+    def _do_paste(self, *a):
+        if not self.readonly:
+            self.text_input.paste()
+
+    def _do_delete(self, *a):
+        if not self.readonly and self.text_input.selection_text:
+            self.text_input.delete_selection()
 
 class TransferTab(BoxLayout):
     def __init__(self, app_ref, **kwargs):
@@ -520,17 +586,15 @@ class TransferTab(BoxLayout):
         header = BoxLayout(size_hint_y=None, height=dp(22))
         lbl1 = Label(text='文件名', size_hint_x=0.5, color=COLORS['hint'], font_size=dp(10))
         if available_font:
-            lbl1.font_name = available_font
+            lbl1.font_name = 'Chinese'
         header.add_widget(lbl1)
-        
         lbl2 = Label(text='大小', size_hint_x=0.2, color=COLORS['hint'], font_size=dp(10))
         if available_font:
-            lbl2.font_name = available_font
+            lbl2.font_name = 'Chinese'
         header.add_widget(lbl2)
-        
         lbl3 = Label(text='来源', size_hint_x=0.3, color=COLORS['hint'], font_size=dp(10))
         if available_font:
-            lbl3.font_name = available_font
+            lbl3.font_name = 'Chinese'
         header.add_widget(lbl3)
         self.add_widget(header)
 
@@ -546,7 +610,7 @@ class TransferTab(BoxLayout):
             color=COLORS['hint'], font_size=dp(10), halign='left',
         )
         if available_font:
-            self.info_label.font_name = available_font
+            self.info_label.font_name = 'Chinese'
         self.info_label.bind(size=self.info_label.setter('text_size'))
         self.add_widget(self.info_label)
 
@@ -555,24 +619,21 @@ class TransferTab(BoxLayout):
         for item in self.files:
             path, size, display, is_local = item
             row = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0])
-            
             lbl1 = Label(
                 text=display[:40] + ('...' if len(display) > 40 else ''),
                 size_hint_x=0.5, color=COLORS['text'], font_size=dp(10),
             )
             if available_font:
-                lbl1.font_name = available_font
+                lbl1.font_name = 'Chinese'
             row.add_widget(lbl1)
-            
             lbl2 = Label(text=format_size(size), size_hint_x=0.2, color=COLORS['text'], font_size=dp(10))
             if available_font:
-                lbl2.font_name = available_font
+                lbl2.font_name = 'Chinese'
             row.add_widget(lbl2)
-            
             src = '本地' if is_local else '服务器'
             lbl3 = Label(text=src, size_hint_x=0.3, color=COLORS['hint'], font_size=dp(10))
             if available_font:
-                lbl3.font_name = available_font
+                lbl3.font_name = 'Chinese'
             row.add_widget(lbl3)
             self.list_layout.add_widget(row)
         self._update_info()
@@ -593,19 +654,20 @@ class TransferTab(BoxLayout):
             foreground_color=COLORS['text'], font_size=dp(14),
         )
         if available_font:
-            path_input.font_name = available_font
+            path_input.font_name = 'Chinese'
         content.add_widget(path_input)
 
         quick = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4))
         home = os.path.expanduser('~')
         for name, p in [
-            ('下载', DOWNLOAD_DIR),
+            ('下载', '/storage/emulated/0/Download'),
             ('Download', os.path.join(home, 'Download')),
             ('Downloads', os.path.join(home, 'Downloads')),
         ]:
             if os.path.isdir(p):
                 b = DarkButton(text=name, size_hint_x=None, width=dp(80), height=dp(24), font_size=dp(10))
-                b.bind(on_press=lambda inst, path=p: path_input.insert_text(path + '/\n'))
+                b.bind(on_press=lambda inst, path=p: path_input.insert_text(path + '/
+'))
                 quick.add_widget(b)
         content.add_widget(quick)
 
@@ -619,7 +681,7 @@ class TransferTab(BoxLayout):
         popup = Popup(title='添加文件', content=content, size_hint=(0.9, 0.6),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
+            popup.title_font = 'Chinese'
 
         def on_ok(*a):
             lines = path_input.text.strip().splitlines()
@@ -701,15 +763,12 @@ class TransferTab(BoxLayout):
         if not files:
             self.app_ref.show_message('服务器没有可下载的文件')
             return
-        
-        # 确保下载目录存在
         download_dir = DOWNLOAD_DIR
         if not os.path.isdir(download_dir):
             try:
                 os.makedirs(download_dir, exist_ok=True)
             except Exception:
                 download_dir = os.path.expanduser('~')
-        
         self.app_ref.update_status(f'正在下载 {len(files)} 个文件...')
         success = fail = 0
         for encoded, display, size in files:
@@ -723,11 +782,6 @@ class TransferTab(BoxLayout):
         self.app_ref.update_status(msg)
         self.refresh_server()
 
-
-# ═══════════════════════════════════════════════════════════════
-# 主界面
-# ═══════════════════════════════════════════════════════════════
-
 class MainLayout(BoxLayout):
     def __init__(self, app, **kwargs):
         super().__init__(**kwargs)
@@ -736,12 +790,11 @@ class MainLayout(BoxLayout):
         self.tabs = []
         self.current_index = 0
         self.editor_counter = 1
-        
+
         self.drag_tab_btn = None
         self.drag_tab_index = -1
         self.drag_over_index = -1
 
-        # ===== 标题栏: [用户名] [空白] [文件] [只读] [设置] =====
         title_bar = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0], spacing=dp(4))
         with title_bar.canvas.before:
             Color(*COLORS['tab_bar'])
@@ -756,7 +809,7 @@ class MainLayout(BoxLayout):
             font_size=dp(10), size_hint_x=None, width=dp(100), halign='left',
         )
         if available_font:
-            self.user_label.font_name = available_font
+            self.user_label.font_name = 'Chinese'
         self.user_label.bind(size=self.user_label.setter('text_size'))
         title_bar.add_widget(self.user_label)
 
@@ -779,7 +832,6 @@ class MainLayout(BoxLayout):
 
         self.add_widget(title_bar)
 
-        # ===== 标签栏 =====
         self.tab_bar = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(2), padding=[dp(2), 0])
         with self.tab_bar.canvas.before:
             Color(*COLORS['tab_bar'])
@@ -790,11 +842,9 @@ class MainLayout(BoxLayout):
         )
         self.add_widget(self.tab_bar)
 
-        # ===== 内容区 =====
         self.content_area = BoxLayout()
         self.add_widget(self.content_area)
 
-        # ===== 状态栏 =====
         status = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(6), 0])
         with status.canvas.before:
             Color(*COLORS['status'])
@@ -811,7 +861,7 @@ class MainLayout(BoxLayout):
             size_hint_x=1,
         )
         if available_font:
-            self.status_label.font_name = available_font
+            self.status_label.font_name = 'Chinese'
         self.status_label.bind(size=self.status_label.setter('text_size'))
         status.add_widget(self.status_label)
         self.add_widget(status)
@@ -824,10 +874,8 @@ class MainLayout(BoxLayout):
             real_idx = len(self.tab_bar.children) - 1 - idx
         except ValueError:
             return
-        
         if not isinstance(btn, TabButton):
             return
-        
         for i, tab in enumerate(self.tabs):
             if tab['btn'] == btn:
                 self.drag_tab_btn = btn
@@ -842,13 +890,11 @@ class MainLayout(BoxLayout):
                 self._swap_tabs(self.drag_tab_index, self.drag_over_index)
                 self.show_tab(self.drag_over_index)
                 self.update_status('标签已重新排序')
-        
         if self.drag_tab_btn:
             self.drag_tab_btn.background_color = COLORS['tab_active'] if self.drag_tab_btn.active else COLORS['tab_inactive']
         self.drag_tab_btn = None
         self.drag_tab_index = -1
         self.drag_over_index = -1
-        
         for tab in self.tabs:
             if tab['btn']:
                 tab['btn'].set_drag_over(False)
@@ -881,14 +927,11 @@ class MainLayout(BoxLayout):
             return
         if from_idx < 0 or from_idx >= len(self.tabs) or to_idx < 0 or to_idx >= len(self.tabs):
             return
-        
         self.tabs[from_idx], self.tabs[to_idx] = self.tabs[to_idx], self.tabs[from_idx]
-        
         if self.current_index == from_idx:
             self.current_index = to_idx
         elif self.current_index == to_idx:
             self.current_index = from_idx
-        
         self.refresh_tab_bar()
 
     def refresh_tab_bar(self):
@@ -903,10 +946,8 @@ class MainLayout(BoxLayout):
             btn.bind(on_release=partial(self._on_tab_press, i))
             tab['btn'] = btn
             temp_tabs.append(btn)
-        
         for btn in temp_tabs:
             self.tab_bar.add_widget(btn)
-        
         plus = DarkButton(text='+', size_hint_x=None, width=dp(30), height=dp(18), font_size=dp(14))
         plus.bind(on_press=lambda *a: self.add_text_tab())
         self.tab_bar.add_widget(plus)
@@ -1029,7 +1070,7 @@ class MainLayout(BoxLayout):
         ti = TextInput(text=tab['title'], multiline=False, font_size=dp(16),
                        background_color=(0.2, 0.2, 0.22, 1), foreground_color=COLORS['text'])
         if available_font:
-            ti.font_name = available_font
+            ti.font_name = 'Chinese'
         content.add_widget(ti)
         btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
         cancel = DarkButton(text='取消', height=dp(28), font_size=dp(11))
@@ -1040,7 +1081,7 @@ class MainLayout(BoxLayout):
         popup = Popup(title='重命名标签', content=content, size_hint=(0.8, 0.35),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
+            popup.title_font = 'Chinese'
 
         def on_ok(*a):
             name = ti.text.strip()
@@ -1054,103 +1095,12 @@ class MainLayout(BoxLayout):
         ok.bind(on_press=on_ok)
         popup.open()
 
-    def set_current_tab_font_size(self):
-        """设置当前文本标签的独立字体大小"""
-        if not self.tabs:
-            return
-        tab = self.tabs[self.current_index]
-        if tab['type'] != 'text':
-            self.app.show_message('当前不是文本标签')
-            return
-
-        widget = tab['widget']
-        current_size = widget._get_effective_font_size()
-        is_inherited = widget.font_size is None
-
-        content = BoxLayout(orientation='vertical', spacing=dp(12), padding=dp(16))
-
-        lbl = Label(
-            text=f'当前标签: {tab["title"]} ({"继承全局" if is_inherited else "独立设置"})',
-            color=COLORS['text'], font_size=dp(14), size_hint_y=None, height=dp(40),
-        )
-        if available_font:
-            lbl.font_name = available_font
-        content.add_widget(lbl)
-
-        slider = Slider(
-            min=10, max=28, value=current_size,
-            step=1, size_hint_y=None, height=dp(40),
-        )
-        slider.value_track = True
-        slider.value_track_color = COLORS['accent']
-        content.add_widget(slider)
-
-        preview = TextInput(
-            text='abcABC123 中文汉字',
-            multiline=False,
-            font_size=dp(current_size),
-            background_color=(0.2, 0.2, 0.22, 1),
-            foreground_color=COLORS['text'],
-            size_hint_y=None,
-            height=dp(50),
-        )
-        if available_font:
-            preview.font_name = available_font
-        content.add_widget(preview)
-
-        hint = Label(
-            text='拖动滑块调整大小（范围: 10 ~ 28）',
-            color=COLORS['hint'], font_size=dp(12), size_hint_y=None, height=dp(24),
-        )
-        if available_font:
-            hint.font_name = available_font
-        content.add_widget(hint)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(10))
-        reset_btn = DarkButton(text='恢复全局', size_hint_x=0.33, height=dp(30), font_size=dp(11))
-        cancel = DarkButton(text='取消', size_hint_x=0.33, height=dp(30), font_size=dp(12))
-        ok = DarkButton(text='确定', size_hint_x=0.34, height=dp(30), font_size=dp(12))
-        btn_row.add_widget(reset_btn)
-        btn_row.add_widget(cancel)
-        btn_row.add_widget(ok)
-        content.add_widget(btn_row)
-
-        popup = Popup(title='当前标签字体大小', content=content, size_hint=(0.9, 0.5),
-                      background_color=COLORS['bg'], title_color=COLORS['text'])
-        if available_font:
-            popup.title_font = available_font
-
-        def on_slider_change(instance, value):
-            size = int(value)
-            lbl.text = f'当前标签: {tab["title"]} (独立设置: {size})'
-            preview.font_size = dp(size)
-
-        slider.bind(value=on_slider_change)
-
-        def on_reset(*a):
-            widget.set_font_size(None)
-            self.update_status(f'已恢复全局字体: {tab["title"]}')
-            popup.dismiss()
-
-        def on_ok(*a):
-            size = int(slider.value)
-            widget.set_font_size(size)
-            self.update_status(f'字体大小已设为: {size} ({tab["title"]})')
-            self.app.save_data(silent=True)
-            popup.dismiss()
-
-        reset_btn.bind(on_press=on_reset)
-        cancel.bind(on_press=popup.dismiss)
-        ok.bind(on_press=on_ok)
-        popup.open()
-
     def show_file_menu(self):
         content = BoxLayout(orientation='vertical', spacing=dp(6), padding=dp(10))
         items = [
             ('新建文本标签', self.add_text_tab),
             ('新建/打开传输页', self.add_transfer_tab),
             ('重命名当前标签', self.rename_current_tab),
-            ('当前标签字体大小', self.set_current_tab_font_size),
             ('关闭当前标签', lambda: self.close_tab(self.current_index)),
             ('立即保存', self.app.save_data),
             ('退出', self.app.stop),
@@ -1158,7 +1108,7 @@ class MainLayout(BoxLayout):
         popup = Popup(title='文件', content=content, size_hint=(0.7, 0.55),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
+            popup.title_font = 'Chinese'
         for text, cb in items:
             b = DarkButton(text=text, height=dp(28), font_size=dp(11))
             b.bind(on_press=lambda inst, c=cb, p=popup: (p.dismiss(), c()))
@@ -1170,12 +1120,13 @@ class MainLayout(BoxLayout):
         items = [
             ('设置用户名', self.app.set_username),
             ('设置FTP密码', self.app.set_ftp_password),
-            ('默认字体大小', self.app.set_editor_font_size),
+            ('全局字体大小(默认值)', self.app.set_editor_font_size),
+            ('当前标签字体大小', self.app.set_current_tab_font_size),
         ]
-        popup = Popup(title='设置', content=content, size_hint=(0.7, 0.45),
+        popup = Popup(title='设置', content=content, size_hint=(0.7, 0.5),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
+            popup.title_font = 'Chinese'
         for text, cb in items:
             b = DarkButton(text=text, height=dp(28), font_size=dp(11))
             b.bind(on_press=lambda inst, c=cb, p=popup: (p.dismiss(), c()))
@@ -1193,16 +1144,10 @@ class MainLayout(BoxLayout):
                 self.status_label.text = FONT_STATUS
 
     def update_all_editor_font_size(self, size):
-        """更新所有继承全局字体大小的标签"""
         for tab in self.tabs:
             if tab['type'] == 'text':
                 if tab['widget'].font_size is None:
                     tab['widget'].set_font_size(None)
-
-
-# ═══════════════════════════════════════════════════════════════
-# App 主类
-# ═══════════════════════════════════════════════════════════════
 
 class MiniNoteApp(App):
     def __init__(self, **kwargs):
@@ -1218,21 +1163,18 @@ class MiniNoteApp(App):
 
         self._auto_save_event = None
         self._dirty = False
-        
+
         self._load_username()
 
     def set_editor_font_size(self):
-        """设置默认字体大小（新标签使用）"""
         content = BoxLayout(orientation='vertical', spacing=dp(12), padding=dp(16))
-        
         lbl = Label(
-            text=f'当前默认字体大小: {self.editor_font_size}',
+            text=f'当前字体大小: {self.editor_font_size}',
             color=COLORS['text'], font_size=dp(14), size_hint_y=None, height=dp(30),
         )
         if available_font:
-            lbl.font_name = available_font
+            lbl.font_name = 'Chinese'
         content.add_widget(lbl)
-        
         slider = Slider(
             min=10, max=28, value=self.editor_font_size,
             step=1, size_hint_y=None, height=dp(40),
@@ -1241,60 +1183,131 @@ class MiniNoteApp(App):
         slider.value_track = True
         slider.value_track_color = COLORS['accent']
         content.add_widget(slider)
-        
         preview = TextInput(
-            text='abcABC123 中文汉字 (新标签默认)',
+            text='abcABC123 中文汉字',
             multiline=False,
             font_size=dp(self.editor_font_size),
             background_color=(0.2, 0.2, 0.22, 1),
             foreground_color=COLORS['text'],
-            size_hint_y=None, height=dp(50),
+            size_hint_y=None,
+            height=dp(50),
         )
         if available_font:
-            preview.font_name = available_font
+            preview.font_name = 'Chinese'
         content.add_widget(preview)
-        
         hint = Label(
-            text='影响新建标签，已有标签不受影响',
+            text='拖动滑块调整大小（范围: 10 ~ 28）',
             color=COLORS['hint'], font_size=dp(12), size_hint_y=None, height=dp(24),
         )
         if available_font:
-            hint.font_name = available_font
+            hint.font_name = 'Chinese'
         content.add_widget(hint)
-        
         btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(10))
         cancel = DarkButton(text='取消', height=dp(30), font_size=dp(12))
         ok = DarkButton(text='确定', height=dp(30), font_size=dp(12))
         btn_row.add_widget(cancel)
         btn_row.add_widget(ok)
         content.add_widget(btn_row)
-        
-        popup = Popup(title='默认字体大小', content=content, size_hint=(0.9, 0.5),
+        popup = Popup(title='编辑器字体大小', content=content, size_hint=(0.9, 0.5),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
-        
+            popup.title_font = 'Chinese'
         def on_slider_change(instance, value):
             size = int(value)
-            lbl.text = f'当前默认字体大小: {size}'
+            lbl.text = f'当前字体大小: {size}'
             preview.font_size = dp(size)
-        
         slider.bind(value=on_slider_change)
-        
         def on_ok(*a):
             size = int(slider.value)
             self.editor_font_size = size
-            self.update_status(f'默认字体大小已设为: {size}')
+            if self.main_layout:
+                self.main_layout.update_all_editor_font_size(size)
+            self.update_status(f'字体大小已设为: {size}')
             self.save_data(silent=True)
             popup.dismiss()
-        
+        cancel.bind(on_press=popup.dismiss)
+        ok.bind(on_press=on_ok)
+        popup.open()
+
+    def set_current_tab_font_size(self):
+        if not self.main_layout or not self.main_layout.tabs:
+            self.show_message('没有打开的标签')
+            return
+        tab = self.main_layout.tabs[self.main_layout.current_index]
+        if tab['type'] != 'text':
+            self.show_message('当前不是文本标签')
+            return
+        widget = tab['widget']
+        current_size = widget._get_effective_font_size()
+        is_inherited = widget.font_size is None
+        content = BoxLayout(orientation='vertical', spacing=dp(12), padding=dp(16))
+        lbl = Label(
+            text=f'当前标签: {tab["title"]} ({"继承全局" if is_inherited else "独立设置"})',
+            color=COLORS['text'], font_size=dp(14), size_hint_y=None, height=dp(40),
+        )
+        if available_font:
+            lbl.font_name = 'Chinese'
+        content.add_widget(lbl)
+        slider = Slider(
+            min=10, max=28, value=current_size,
+            step=1, size_hint_y=None, height=dp(40),
+        )
+        slider.value_track = True
+        slider.value_track_color = COLORS['accent']
+        content.add_widget(slider)
+        preview = TextInput(
+            text='abcABC123 中文汉字',
+            multiline=False,
+            font_size=dp(current_size),
+            background_color=(0.2, 0.2, 0.22, 1),
+            foreground_color=COLORS['text'],
+            size_hint_y=None,
+            height=dp(50),
+        )
+        if available_font:
+            preview.font_name = 'Chinese'
+        content.add_widget(preview)
+        hint = Label(
+            text='拖动滑块调整大小（范围: 10 ~ 28）',
+            color=COLORS['hint'], font_size=dp(12), size_hint_y=None, height=dp(24),
+        )
+        if available_font:
+            hint.font_name = 'Chinese'
+        content.add_widget(hint)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(10))
+        reset_btn = DarkButton(text='恢复全局', size_hint_x=0.33, height=dp(30), font_size=dp(11))
+        cancel = DarkButton(text='取消', size_hint_x=0.33, height=dp(30), font_size=dp(12))
+        ok = DarkButton(text='确定', size_hint_x=0.34, height=dp(30), font_size=dp(12))
+        btn_row.add_widget(reset_btn)
+        btn_row.add_widget(cancel)
+        btn_row.add_widget(ok)
+        content.add_widget(btn_row)
+        popup = Popup(title='当前标签字体大小', content=content, size_hint=(0.9, 0.5),
+                      background_color=COLORS['bg'], title_color=COLORS['text'])
+        if available_font:
+            popup.title_font = 'Chinese'
+        def on_slider_change(instance, value):
+            size = int(value)
+            lbl.text = f'当前标签: {tab["title"]} (独立设置: {size})'
+            preview.font_size = dp(size)
+        slider.bind(value=on_slider_change)
+        def on_reset(*a):
+            widget.set_font_size(None)
+            self.update_status(f'已恢复全局字体: {tab["title"]}')
+            popup.dismiss()
+        def on_ok(*a):
+            size = int(slider.value)
+            widget.set_font_size(size)
+            self.update_status(f'字体大小已设为: {size} ({tab["title"]})')
+            self.save_data(silent=True)
+            popup.dismiss()
+        reset_btn.bind(on_press=on_reset)
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
         popup.open()
 
     def _load_username(self):
         search_dirs = []
-        
         if platform == 'android':
             search_dirs = [
                 self.user_data_dir,
@@ -1307,7 +1320,6 @@ class MiniNoteApp(App):
                 '.',
                 os.path.expanduser('~'),
             ]
-        
         for d in search_dirs:
             try:
                 if not os.path.isdir(d):
@@ -1320,13 +1332,13 @@ class MiniNoteApp(App):
                                 self.username = data['username']
                                 if 'editor_font_size' in data:
                                     self.editor_font_size = data['editor_font_size']
-                                print(f"✅ 从文件恢复用户名: {self.username} ({f})")
+                                print(f"从文件恢复用户名: {self.username} ({f})")
                                 return
                     except Exception:
                         pass
             except Exception:
                 pass
-        print("⚠️ 未找到已保存的用户名")
+        print("未找到已保存的用户名")
 
     def check_first_start(self):
         if not self.username:
@@ -1338,7 +1350,6 @@ class MiniNoteApp(App):
     def build(self):
         Window.clearcolor = COLORS['bg']
         Window.bind(on_resize=self._on_resize)
-        
         self.main_layout = MainLayout(self)
         self._auto_save_event = Clock.schedule_interval(self._auto_save, AUTO_SAVE_INTERVAL)
         Clock.schedule_once(lambda dt: self._on_resize(Window, *Window.size), 0.2)
@@ -1370,8 +1381,6 @@ class MiniNoteApp(App):
                 if btn and isinstance(btn, TabButton):
                     btn.width = dp(90)
 
-    # ── 设置用户名 ──
-
     def set_username(self):
         content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(12))
         lbl = Label(
@@ -1379,16 +1388,15 @@ class MiniNoteApp(App):
             color=COLORS['hint'], font_size=dp(13), size_hint_y=None, height=dp(50),
         )
         if available_font:
-            lbl.font_name = available_font
+            lbl.font_name = 'Chinese'
         content.add_widget(lbl)
-        
         ti = TextInput(
             text=self.username, multiline=False, font_size=dp(16),
             background_color=(0.2, 0.2, 0.22, 1), foreground_color=COLORS['text'],
             hint_text='输入用户名',
         )
         if available_font:
-            ti.font_name = available_font
+            ti.font_name = 'Chinese'
         content.add_widget(ti)
         btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
         cancel = DarkButton(text='取消', height=dp(28), font_size=dp(11))
@@ -1396,12 +1404,10 @@ class MiniNoteApp(App):
         btn_row.add_widget(cancel)
         btn_row.add_widget(ok)
         content.add_widget(btn_row)
-
         popup = Popup(title='设置用户名', content=content, size_hint=(0.85, 0.45),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
-
+            popup.title_font = 'Chinese'
         def on_ok(*a):
             name = ti.text.strip()
             if name:
@@ -1411,12 +1417,9 @@ class MiniNoteApp(App):
                 self.load_data()
             else:
                 self.show_message('用户名不能为空')
-
         cancel.bind(on_press=popup.dismiss)
         ok.bind(on_press=on_ok)
         popup.open()
-
-    # ── 设置FTP密码 ──
 
     def set_ftp_password(self):
         content = BoxLayout(orientation='vertical', spacing=dp(10), padding=dp(12))
@@ -1425,11 +1428,9 @@ class MiniNoteApp(App):
             color=COLORS['hint'], font_size=dp(13), size_hint_y=None, height=dp(50),
         )
         if available_font:
-            lbl.font_name = available_font
+            lbl.font_name = 'Chinese'
         content.add_widget(lbl)
-        
         current_password = load_password()
-        
         ti = TextInput(
             text=current_password,
             multiline=False, font_size=dp(16),
@@ -1438,25 +1439,22 @@ class MiniNoteApp(App):
             password=True,
         )
         if available_font:
-            ti.font_name = available_font
+            ti.font_name = 'Chinese'
         content.add_widget(ti)
-        
         status_hint = Label(
             text=f'当前状态: {"✅ 已设置密码" if current_password else "❌ 未设置密码"}',
             color=COLORS['success'] if current_password else COLORS['danger'],
             font_size=dp(12), size_hint_y=None, height=dp(24),
         )
         if available_font:
-            status_hint.font_name = available_font
+            status_hint.font_name = 'Chinese'
         content.add_widget(status_hint)
-        
         btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
         test_btn = DarkButton(text='测试连接', size_hint_x=0.5, height=dp(28), font_size=dp(11))
         save_btn = DarkButton(text='保存', size_hint_x=0.5, height=dp(28), font_size=dp(11))
         btn_row.add_widget(test_btn)
         btn_row.add_widget(save_btn)
         content.add_widget(btn_row)
-        
         cancel_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
         clear_btn = DarkButton(text='清除密码', size_hint_x=0.5, height=dp(28), font_size=dp(11))
         clear_btn.background_color = COLORS['danger']
@@ -1464,20 +1462,17 @@ class MiniNoteApp(App):
         cancel_row.add_widget(clear_btn)
         cancel_row.add_widget(cancel_btn)
         content.add_widget(cancel_row)
-        
         status_label = Label(
             text='', color=COLORS['hint'], font_size=dp(12),
             size_hint_y=None, height=dp(24),
         )
         if available_font:
-            status_label.font_name = available_font
+            status_label.font_name = 'Chinese'
         content.add_widget(status_label)
-
         popup = Popup(title='设置FTP密码', content=content, size_hint=(0.9, 0.7),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
-
+            popup.title_font = 'Chinese'
         def test_connection(*a):
             password = ti.text.strip()
             if not password:
@@ -1496,7 +1491,6 @@ class MiniNoteApp(App):
             except Exception as e:
                 status_label.text = f'❌ 连接失败: {str(e)[:40]}'
                 status_label.color = COLORS['danger']
-
         def save_password_and_close(*a):
             password = ti.text.strip()
             if save_password(password):
@@ -1516,7 +1510,6 @@ class MiniNoteApp(App):
             else:
                 status_label.text = '❌ 操作失败'
                 status_label.color = COLORS['danger']
-
         def clear_password_and_close(*a):
             if save_password(''):
                 status_label.text = '✅ 密码已清除'
@@ -1528,7 +1521,6 @@ class MiniNoteApp(App):
             else:
                 status_label.text = '❌ 清除失败'
                 status_label.color = COLORS['danger']
-
         test_btn.bind(on_press=test_connection)
         save_btn.bind(on_press=save_password_and_close)
         clear_btn.bind(on_press=clear_password_and_close)
@@ -1536,16 +1528,12 @@ class MiniNoteApp(App):
         ti.bind(on_text_validate=test_connection)
         popup.open()
 
-    # ── 加载数据（优先服务器） ──
-
     def load_data(self):
         if not self.username:
             self.update_status('请先设置用户名')
             return
-        
         filename = f'{self.username}.note'
         self.update_status(f'正在加载 {filename}...')
-        
         if has_password():
             self.update_status(f'从服务器加载 {filename}...')
             ftp_content = ftp_download_json(filename)
@@ -1559,7 +1547,6 @@ class MiniNoteApp(App):
                     return
                 except Exception as e:
                     print(f"服务器数据解析失败: {e}")
-        
         self.update_status(f'从本地加载 {filename}...')
         local_data = self._load_local_data(filename)
         if local_data:
@@ -1568,13 +1555,11 @@ class MiniNoteApp(App):
             self.last_loaded_source = f'本地: {filename}'
             self.update_status(f'已从本地加载: {filename}')
             return
-        
         self.update_status(f'新建空白笔记: {filename}')
         self._create_new_note()
 
     def _load_local_data(self, filename):
         search_dirs = []
-        
         if platform == 'android':
             search_dirs = [
                 self.user_data_dir,
@@ -1587,31 +1572,27 @@ class MiniNoteApp(App):
                 '.',
                 os.path.expanduser('~'),
             ]
-        
         for d in search_dirs:
             path = os.path.join(d, filename)
             try:
                 if os.path.exists(path):
                     with open(path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        print(f"✅ 本地加载成功: {path}")
+                        print(f"本地加载成功: {path}")
                         return data
             except Exception as e:
-                print(f"❌ 本地加载失败 {path}: {e}")
+                print(f"本地加载失败 {path}: {e}")
         return None
 
     def _apply_data(self, data):
         self.username = data.get('username', self.username)
         if self.main_layout:
             self.main_layout.user_label.text = self.username
-        
         if 'editor_font_size' in data:
             self.editor_font_size = data['editor_font_size']
-        
         self.preserved_tabs = []
         text_tabs = []
         has_transfer = False
-        
         for tab in data.get('tabs', []):
             t = tab.get('type')
             if t == 'text':
@@ -1620,24 +1601,20 @@ class MiniNoteApp(App):
                 has_transfer = True
             else:
                 self.preserved_tabs.append(copy.deepcopy(tab))
-        
         self.other_data = {
             k: copy.deepcopy(v)
             for k, v in data.items()
             if k not in ('tabs', 'username', 'editor_font_size')
         }
-        
         transfer_widget = None
         if self.main_layout:
             for t in self.main_layout.tabs:
                 if t['type'] == 'transfer':
                     transfer_widget = t['widget']
                     break
-        
         if self.main_layout:
             self.main_layout.tabs.clear()
             self.main_layout.editor_counter = 1
-            
             if text_tabs:
                 for tab in text_tabs:
                     title = tab.get('title', f'无标题 {self.main_layout.editor_counter}')
@@ -1650,10 +1627,9 @@ class MiniNoteApp(App):
                     )
             else:
                 self.main_layout.add_text_tab()
-            
             if has_transfer or transfer_widget is not None:
                 self.main_layout.add_transfer_tab()
-            
+            self.main_layout.update_all_editor_font_size(self.editor_font_size)
             for i, t in enumerate(self.main_layout.tabs):
                 if t['type'] == 'text':
                     self.main_layout.show_tab(i)
@@ -1667,9 +1643,8 @@ class MiniNoteApp(App):
         self.main_layout.show_tab(0)
         self.preserved_tabs = []
         self.other_data = {}
+        self.main_layout.update_all_editor_font_size(self.editor_font_size)
         self.update_status(f'新建笔记: {self.username}.note')
-
-    # ── 保存数据 ──
 
     def save_data(self, silent=False, is_auto=False):
         if not self.username:
@@ -1677,16 +1652,12 @@ class MiniNoteApp(App):
                 self.update_status('未设置用户名，无法保存')
                 self.show_message('请先设置用户名')
             return
-        
         if not has_password():
             if not silent:
                 self.update_status('未设置FTP密码，仅保存到本地')
-        
         filename = f'{self.username}.note'
-        
         tabs = []
         tabs.extend(copy.deepcopy(self.preserved_tabs))
-        
         if self.main_layout:
             for tab in self.main_layout.tabs:
                 if tab['type'] == 'text':
@@ -1703,20 +1674,16 @@ class MiniNoteApp(App):
                         'title': tab['title'],
                         'content': '',
                     })
-        
         data = copy.deepcopy(self.other_data)
         data['username'] = self.username
         data['tabs'] = tabs
         data['editor_font_size'] = self.editor_font_size
-        
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
-        
         local_ok = False
         save_paths = [filename]
         if platform == 'android':
             save_paths.insert(0, os.path.join(self.user_data_dir, filename))
             save_paths.append(os.path.join('/storage/emulated/0', filename))
-        
         for path in save_paths:
             try:
                 folder = os.path.dirname(path)
@@ -1728,14 +1695,12 @@ class MiniNoteApp(App):
                 break
             except Exception as e:
                 print(f'本地保存失败 {path}: {e}')
-        
         ftp_ok = False
         if has_password():
             ftp_ok = ftp_upload_json(json_str, filename)
         else:
             if not is_auto and not silent:
                 self.update_status('FTP未配置，仅保存到本地')
-        
         if is_auto:
             if local_ok and ftp_ok:
                 self.last_auto_save_msg = '自动保存 ✓'
@@ -1748,7 +1713,6 @@ class MiniNoteApp(App):
             if self.main_layout:
                 self.main_layout.status_label.text = self.last_auto_save_msg
             return
-        
         if local_ok and ftp_ok:
             self.update_status(f'已保存到本地+FTP: {filename}')
         elif local_ok:
@@ -1760,8 +1724,6 @@ class MiniNoteApp(App):
             if not silent:
                 self.show_message('保存失败，请检查网络或权限')
 
-    # ── 工具 ──
-
     def update_status(self, msg=None):
         if self.main_layout:
             self.main_layout.update_status(msg)
@@ -1770,14 +1732,14 @@ class MiniNoteApp(App):
         content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
         lbl = Label(text=text, color=COLORS['text'], font_size=dp(15))
         if available_font:
-            lbl.font_name = available_font
+            lbl.font_name = 'Chinese'
         content.add_widget(lbl)
         btn = DarkButton(text='确定', height=dp(28), font_size=dp(11))
         content.add_widget(btn)
         popup = Popup(title='提示', content=content, size_hint=(0.8, 0.35),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
+            popup.title_font = 'Chinese'
         btn.bind(on_press=popup.dismiss)
         popup.open()
 
@@ -1785,7 +1747,7 @@ class MiniNoteApp(App):
         content = BoxLayout(orientation='vertical', padding=dp(16), spacing=dp(12))
         lbl = Label(text=text, color=COLORS['text'], font_size=dp(14))
         if available_font:
-            lbl.font_name = available_font
+            lbl.font_name = 'Chinese'
         content.add_widget(lbl)
         btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
         no_btn = DarkButton(text='取消', height=dp(28), font_size=dp(11))
@@ -1797,17 +1759,14 @@ class MiniNoteApp(App):
         popup = Popup(title='确认', content=content, size_hint=(0.85, 0.4),
                       background_color=COLORS['bg'], title_color=COLORS['text'])
         if available_font:
-            popup.title_font = available_font
-
+            popup.title_font = 'Chinese'
         def yes(*a):
             popup.dismiss()
             if on_yes:
                 on_yes()
-
         no_btn.bind(on_press=popup.dismiss)
         yes_btn.bind(on_press=yes)
         popup.open()
-
 
 if __name__ == '__main__':
     MiniNoteApp().run()
