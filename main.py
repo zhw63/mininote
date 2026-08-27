@@ -251,54 +251,34 @@ def ftp_list_files(remote_dir="files"):
 
 
 def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
-    """下载FTP文件并删除（移动操作）- 使用电脑版稳定实现"""
+    """下载FTP文件并删除 - 使用电脑版稳定实现"""
     ftp = None
     try:
-        ftp = get_ftp()
+        # 使用电脑版完全相同的方式
+        ftp = FTP()
+        ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
+        password = load_password()
+        if not password:
+            raise Exception("请先设置FTP密码")
+        ftp.login(FTP_USER, password)
+        
         ftp.cwd(remote_dir)
         
         # 确保本地目录存在
         local_dir = os.path.dirname(local_path)
         if local_dir and not os.path.exists(local_dir):
-            try:
-                os.makedirs(local_dir, exist_ok=True)
-                print(f"创建目录: {local_dir}")
-            except Exception as e:
-                print(f"创建目录失败: {e}")
-                return False
+            os.makedirs(local_dir, exist_ok=True)
         
-        # 直接下载，不预先检查文件是否存在
-        print(f"正在下载: {remote_name} -> {local_path}")
-        with open(local_path, "wb") as f:
-            ftp.retrbinary(f"RETR {remote_name}", f.write)
-        
-        print(f"下载成功: {remote_name}")
-        
-        # 验证下载的文件大小
-        if os.path.exists(local_path):
-            downloaded_size = os.path.getsize(local_path)
-            print(f"下载大小: {downloaded_size} bytes")
-            if downloaded_size == 0:
-                print(f"警告: 下载的文件大小为0")
+        # 直接下载，与电脑版完全一致
+        with open(local_path, 'wb') as f:
+            ftp.retrbinary(f'RETR {remote_name}', f.write)
         
         # 删除远程文件
-        try:
-            ftp.delete(remote_name)
-            print(f"删除远程文件成功: {remote_name}")
-        except Exception as e:
-            print(f"删除远程文件失败: {e}")
-            # 即使删除失败，下载成功也算成功
-        
+        ftp.delete(remote_name)
         return True
         
-    except error_perm as e:
-        if "550" in str(e):
-            print(f"FTP文件不存在: {remote_name}")
-        else:
-            print(f"FTP权限错误: {e}")
-        return False
     except Exception as e:
-        print(f"FTP下载失败 {remote_name}: {e}")
+        print(f"FTP 下载删除失败 {remote_name}: {e}")
         return False
     finally:
         if ftp:
