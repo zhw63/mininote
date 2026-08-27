@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.19
-功能：多标签文本编辑 + FTP 传输 + 标签拖拽排序 + 长按删除
-- 用户名决定文件名（用户名.note）
-- 优先从服务器加载，失败则加载本地
-- 每5秒自动保存到本地 + FTP
-- 长按标签删除（0.8秒）
-- 横竖屏自适应
-- 编辑器字体大小可调（dp10~dp28）
-- 状态栏显示当前加载的字体
-- 固定下载目录: /storage/emulated/0/fileshare/notefile
-- ScrollView + 智能触摸分流 实现流畅滚动
-- 文本块操作工具栏（全选/复制/剪切/粘贴/删除）
+精简版多标签记事本 - 安卓版 (Kivy) V1.21
+修复FTP下载问题
 """
 
 import os
@@ -21,7 +11,7 @@ import glob
 import io
 import copy
 import urllib.parse
-from ftplib import FTP, error_perm
+from ftplib import FTP, error_perm, error_temp, error_reply
 from functools import partial
 
 from kivy.app import App
@@ -179,11 +169,13 @@ def ftp_download_json(filename):
         ftp.retrbinary(f"RETR {filename}", bio.write)
         return bio.getvalue().decode("utf-8")
     except error_perm as e:
-        if "550" not in str(e):
-            print(f"FTP 下载失败: {e}")
+        if "550" in str(e):
+            print(f"FTP文件不存在: {filename}")
+        else:
+            print(f"FTP权限错误: {e}")
         return None
     except Exception as e:
-        print(f"FTP 下载失败: {e}")
+        print(f"FTP下载失败: {e}")
         return None
     finally:
         if ftp:
@@ -254,16 +246,49 @@ def ftp_list_files(remote_dir="files"):
 
 
 def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
+    """下载FTP文件并删除（移动操作）"""
     ftp = None
     try:
         ftp = get_ftp()
         ftp.cwd(remote_dir)
+        
+        # 尝试下载文件
+        print(f"正在下载: {remote_name} -> {local_path}")
+        
+        # 确保本地目录存在
+        local_dir = os.path.dirname(local_path)
+        if local_dir and not os.path.exists(local_dir):
+            try:
+                os.makedirs(local_dir, exist_ok=True)
+                print(f"创建目录: {local_dir}")
+            except Exception as e:
+                print(f"创建目录失败: {e}")
+                return False
+        
+        # 下载文件
         with open(local_path, "wb") as f:
             ftp.retrbinary(f"RETR {remote_name}", f.write)
-        ftp.delete(remote_name)
+        
+        print(f"下载成功: {remote_name}")
+        
+        # 删除远程文件
+        try:
+            ftp.delete(remote_name)
+            print(f"删除远程文件成功: {remote_name}")
+        except Exception as e:
+            print(f"删除远程文件失败: {e}")
+            # 即使删除失败，下载成功也算成功
+        
         return True
+        
+    except error_perm as e:
+        if "550" in str(e):
+            print(f"FTP文件不存在: {remote_name}")
+        else:
+            print(f"FTP权限错误: {e}")
+        return False
     except Exception as e:
-        print(f"FTP 下载删除失败 {remote_name}: {e}")
+        print(f"FTP下载失败 {remote_name}: {e}")
         return False
     finally:
         if ftp:
@@ -790,28 +815,44 @@ class TransferTab(BoxLayout):
         if not has_password():
             self.app_ref.show_message("请先设置FTP密码")
             return
+        
         self.app_ref.update_status("正在查询服务器...")
         files = ftp_list_files("files")
+        
         if not files:
             self.app_ref.show_message("服务器没有可下载的文件")
             return
+        
         download_dir = DOWNLOAD_DIR
         if not os.path.isdir(download_dir):
             try:
                 os.makedirs(download_dir, exist_ok=True)
-            except Exception:
+                print(f"创建下载目录: {download_dir}")
+            except Exception as e:
+                print(f"创建下载目录失败: {e}")
                 download_dir = os.path.expanduser("~")
+                print(f"使用备用目录: {download_dir}")
+        
         self.app_ref.update_status(f"正在下载 {len(files)} 个文件...")
         success = fail = 0
+        
         for encoded, display, size in files:
+            # 使用解码后的显示名称作为本地文件名
             local_path = os.path.join(download_dir, display)
+            print(f"准备下载: {display} ({size} bytes)")
+            
             if ftp_download_and_delete(encoded, local_path, "files"):
                 success += 1
+                print(f"下载成功: {display}")
             else:
                 fail += 1
+                print(f"下载失败: {display}")
+        
         msg = f"下载完成: {success} 成功" + (f", {fail} 失败" if fail else "")
         self.app_ref.show_message(msg + chr(10) + f"保存到: {download_dir}")
         self.app_ref.update_status(msg)
+        
+        # 刷新服务器列表
         self.refresh_server()
 
 
