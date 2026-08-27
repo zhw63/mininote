@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-精简版多标签记事本 - 安卓版 (Kivy) V1.21
-修复FTP下载问题
+精简版多标签记事本 - 安卓版 (Kivy) V1.22
+功能：多标签文本编辑 + FTP 备份
+- 用户名决定文件名（用户名.note）
+- 优先从服务器加载，失败则加载本地
+- 每5秒自动保存到本地 + FTP
+- 长按标签删除（0.8秒）
+- 横竖屏自适应
+- 编辑器字体大小可调（dp10~dp28）
+- 状态栏显示当前加载的字体
+- ScrollView + 智能触摸分流 实现流畅滚动
+- 文本块操作工具栏（全选/复制/剪切/粘贴/删除）
 """
 
 import os
@@ -11,7 +20,7 @@ import glob
 import io
 import copy
 import urllib.parse
-from ftplib import FTP, error_perm, error_temp, error_reply
+from ftplib import FTP, error_perm
 from functools import partial
 
 from kivy.app import App
@@ -99,8 +108,6 @@ FTP_USER = 'zhw63'
 PASSWORD_FILE = 'ftp_password.txt'
 AUTO_SAVE_INTERVAL = 5.0
 
-DOWNLOAD_DIR = '/storage/emulated/0/fileshare/notefile'
-
 
 def save_password(password):
     try:
@@ -183,118 +190,6 @@ def ftp_download_json(filename):
                 ftp.quit()
             except Exception:
                 pass
-
-
-def ftp_upload_file(local_path, remote_dir="files"):
-    ftp = None
-    try:
-        ftp = get_ftp()
-        try:
-            ftp.cwd(remote_dir)
-        except error_perm:
-            ftp.mkd(remote_dir)
-            ftp.cwd(remote_dir)
-        filename = os.path.basename(local_path)
-        safe_filename = urllib.parse.quote(filename, safe="")
-        with open(local_path, "rb") as f:
-            ftp.storbinary(f"STOR {safe_filename}", f)
-        return True
-    except Exception as e:
-        print(f"FTP 上传文件失败: {e}")
-        return False
-    finally:
-        if ftp:
-            try:
-                ftp.quit()
-            except Exception:
-                pass
-
-
-def ftp_list_files(remote_dir="files"):
-    """获取FTP服务器文件列表 - 使用电脑版稳定实现"""
-    ftp = None
-    try:
-        ftp = get_ftp()
-        ftp.cwd(remote_dir)
-        files = []
-
-        def parse_line(line):
-            parts = line.split()
-            if len(parts) >= 9:
-                if parts[0].startswith("d"):
-                    return
-                name = " ".join(parts[8:])
-                if name in (".", ".."):
-                    return
-                try:
-                    size = int(parts[4])
-                except (ValueError, IndexError):
-                    size = 0
-                try:
-                    display_name = urllib.parse.unquote(name)
-                except Exception:
-                    display_name = name
-                files.append((name, display_name, size))
-                print(f"发现文件: {display_name} ({size} bytes)")
-
-        ftp.retrlines("LIST", parse_line)
-        return files
-    except Exception as e:
-        print(f"FTP 列出文件失败: {e}")
-        return []
-    finally:
-        if ftp:
-            try:
-                ftp.quit()
-            except Exception:
-                pass
-
-
-def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
-    """下载FTP文件并删除 - 使用电脑版稳定实现"""
-    ftp = None
-    try:
-        # 使用电脑版完全相同的方式
-        ftp = FTP()
-        ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
-        password = load_password()
-        if not password:
-            raise Exception("请先设置FTP密码")
-        ftp.login(FTP_USER, password)
-        
-        ftp.cwd(remote_dir)
-        
-        # 确保本地目录存在
-        local_dir = os.path.dirname(local_path)
-        if local_dir and not os.path.exists(local_dir):
-            os.makedirs(local_dir, exist_ok=True)
-        
-        # 直接下载，与电脑版完全一致
-        with open(local_path, 'wb') as f:
-            ftp.retrbinary(f'RETR {remote_name}', f.write)
-        
-        # 删除远程文件
-        ftp.delete(remote_name)
-        return True
-        
-    except Exception as e:
-        print(f"FTP 下载删除失败 {remote_name}: {e}")
-        return False
-    finally:
-        if ftp:
-            try:
-                ftp.quit()
-            except Exception:
-                pass
-
-
-def format_size(size):
-    if size < 1024:
-        return f"{size} B"
-    elif size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    else:
-        return f"{size / (1024 * 1024):.2f} MB"
 
 
 COLORS = {
@@ -607,245 +502,6 @@ class TextTab(BoxLayout):
             self.text_input.delete_selection()
 
 
-class TransferTab(BoxLayout):
-    def __init__(self, app_ref, **kwargs):
-        super().__init__(**kwargs)
-        self.app_ref = app_ref
-        self.orientation = "vertical"
-        self.padding = dp(8)
-        self.spacing = dp(6)
-        self.files = []
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(4))
-        for text, cb in [
-            ("添加文件", self.add_files),
-            ("清空", self.clear_list),
-            ("刷新服务器", self.refresh_server),
-            ("上传", self.upload_files),
-            ("下载", self.download_files),
-        ]:
-            btn = DarkButton(text=text)
-            btn.height = dp(28)
-            btn.font_size = dp(10)
-            btn.bind(on_press=lambda inst, c=cb: c())
-            btn_row.add_widget(btn)
-        self.add_widget(btn_row)
-
-        header = BoxLayout(size_hint_y=None, height=dp(22))
-        lbl1 = Label(text="文件名", size_hint_x=0.5, color=COLORS["hint"], font_size=dp(10))
-        if available_font:
-            lbl1.font_name = "Chinese"
-        header.add_widget(lbl1)
-        lbl2 = Label(text="大小", size_hint_x=0.2, color=COLORS["hint"], font_size=dp(10))
-        if available_font:
-            lbl2.font_name = "Chinese"
-        header.add_widget(lbl2)
-        lbl3 = Label(text="来源", size_hint_x=0.3, color=COLORS["hint"], font_size=dp(10))
-        if available_font:
-            lbl3.font_name = "Chinese"
-        header.add_widget(lbl3)
-        self.add_widget(header)
-
-        self.scroll = ScrollView()
-        self.list_layout = GridLayout(cols=1, spacing=dp(2), size_hint_y=None)
-        self.list_layout.bind(minimum_height=self.list_layout.setter("height"))
-        self.scroll.add_widget(self.list_layout)
-        self.add_widget(self.scroll)
-
-        self.info_label = Label(
-            text="总大小: 0 MB / 90 MB  |  共 0 个文件",
-            size_hint_y=None, height=dp(20),
-            color=COLORS["hint"], font_size=dp(10), halign="left",
-        )
-        if available_font:
-            self.info_label.font_name = "Chinese"
-        self.info_label.bind(size=self.info_label.setter("text_size"))
-        self.add_widget(self.info_label)
-
-    def _refresh_list_ui(self):
-        self.list_layout.clear_widgets()
-        for item in self.files:
-            path, size, display, is_local = item
-            row = BoxLayout(size_hint_y=None, height=dp(26), padding=[dp(4), 0])
-            lbl1 = Label(
-                text=display[:40] + ("..." if len(display) > 40 else ""),
-                size_hint_x=0.5, color=COLORS["text"], font_size=dp(10),
-            )
-            if available_font:
-                lbl1.font_name = "Chinese"
-            row.add_widget(lbl1)
-            lbl2 = Label(text=format_size(size), size_hint_x=0.2, color=COLORS["text"], font_size=dp(10))
-            if available_font:
-                lbl2.font_name = "Chinese"
-            row.add_widget(lbl2)
-            src = "本地" if is_local else "服务器"
-            lbl3 = Label(text=src, size_hint_x=0.3, color=COLORS["hint"], font_size=dp(10))
-            if available_font:
-                lbl3.font_name = "Chinese"
-            row.add_widget(lbl3)
-            self.list_layout.add_widget(row)
-        self._update_info()
-
-    def _update_info(self):
-        total = sum(s for _, s, _, _ in self.files)
-        total_mb = total / (1024 * 1024)
-        color = COLORS["danger"] if total_mb > 90 else COLORS["hint"]
-        self.info_label.color = color
-        self.info_label.text = f"总大小: {total_mb:.2f} MB / 90 MB  |  共 {len(self.files)} 个文件"
-
-    def add_files(self):
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        path_input = TextInput(
-            hint_text="输入文件完整路径，或多个路径用换行分隔",
-            multiline=True, size_hint_y=0.6,
-            background_color=(0.2, 0.2, 0.22, 1),
-            foreground_color=COLORS["text"], font_size=dp(14),
-        )
-        if available_font:
-            path_input.font_name = "Chinese"
-        content.add_widget(path_input)
-
-        quick = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4))
-        home = os.path.expanduser("~")
-        for name, p in [
-            ("下载", "/storage/emulated/0/Download"),
-            ("Download", os.path.join(home, "Download")),
-            ("Downloads", os.path.join(home, "Downloads")),
-        ]:
-            if os.path.isdir(p):
-                b = DarkButton(text=name, size_hint_x=None, width=dp(80), height=dp(24), font_size=dp(10))
-                b.bind(on_press=lambda inst, path=p: path_input.insert_text(path + "/" + chr(10)))
-                quick.add_widget(b)
-        content.add_widget(quick)
-
-        btn_row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(10))
-        cancel_btn = DarkButton(text="取消", height=dp(28), font_size=dp(11))
-        ok_btn = DarkButton(text="添加", height=dp(28), font_size=dp(11))
-        btn_row.add_widget(cancel_btn)
-        btn_row.add_widget(ok_btn)
-        content.add_widget(btn_row)
-
-        popup = Popup(title="添加文件", content=content, size_hint=(0.9, 0.6),
-                      background_color=COLORS["bg"], title_color=COLORS["text"])
-        if available_font:
-            popup.title_font = "Chinese"
-
-        def on_ok(*a):
-            lines = path_input.text.strip().splitlines()
-            for line in lines:
-                path = line.strip().strip(chr(34)).strip(chr(39))
-                if path and os.path.isfile(path):
-                    if any(p == path for p, _, _, local in self.files if local):
-                        continue
-                    size = os.path.getsize(path)
-                    self.files.append((path, size, os.path.basename(path), True))
-            self._refresh_list_ui()
-            popup.dismiss()
-
-        cancel_btn.bind(on_press=popup.dismiss)
-        ok_btn.bind(on_press=on_ok)
-        popup.open()
-
-    def clear_list(self):
-        self.files.clear()
-        self._refresh_list_ui()
-
-    def refresh_server(self):
-        if not self.app_ref.username:
-            self.app_ref.show_message("请先设置用户名")
-            return
-        if not has_password():
-            self.app_ref.show_message("请先设置FTP密码")
-            return
-        self.app_ref.update_status("正在查询服务器...")
-        files = ftp_list_files("files")
-        self.files.clear()
-        if not files:
-            self._refresh_list_ui()
-            self.app_ref.show_message("服务器 files 目录为空")
-            self.app_ref.update_status("服务器为空")
-            return
-        for encoded, display, size in files:
-            self.files.append((encoded, size, display, False))
-        self._refresh_list_ui()
-        self.app_ref.update_status(f"服务器: {len(files)} 个文件")
-
-    def upload_files(self):
-        if not self.app_ref.username:
-            self.app_ref.show_message("请先设置用户名")
-            return
-        if not has_password():
-            self.app_ref.show_message("请先设置FTP密码")
-            return
-        local_files = [(p, s, d) for p, s, d, is_local in self.files if is_local]
-        if not local_files:
-            self.app_ref.show_message("没有本地文件可上传")
-            return
-        total = sum(s for _, s, _ in local_files)
-        if total > 90 * 1024 * 1024:
-            self.app_ref.show_message("总大小超过 90MB 限制")
-            return
-        self.app_ref.update_status("正在上传...")
-        success = fail = 0
-        for path, _, _ in local_files:
-            if ftp_upload_file(path, "files"):
-                success += 1
-            else:
-                fail += 1
-        self.files = [f for f in self.files if not f[3]]
-        self._refresh_list_ui()
-        msg = f"上传完成: {success} 成功" + (f", {fail} 失败" if fail else "")
-        self.app_ref.show_message(msg)
-        self.app_ref.update_status(msg)
-
-    def download_files(self):
-        if not self.app_ref.username:
-            self.app_ref.show_message("请先设置用户名")
-            return
-        if not has_password():
-            self.app_ref.show_message("请先设置FTP密码")
-            return
-        
-        self.app_ref.update_status("正在查询服务器...")
-        files = ftp_list_files("files")
-        
-        if not files:
-            self.app_ref.show_message("服务器没有可下载的文件")
-            return
-        
-        download_dir = DOWNLOAD_DIR
-        if not os.path.isdir(download_dir):
-            try:
-                os.makedirs(download_dir, exist_ok=True)
-                print(f"创建下载目录: {download_dir}")
-            except Exception as e:
-                print(f"创建下载目录失败: {e}")
-                download_dir = os.path.expanduser("~")
-                print(f"使用备用目录: {download_dir}")
-        
-        self.app_ref.update_status(f"正在下载 {len(files)} 个文件...")
-        success = fail = 0
-        
-        for encoded, display, size in files:
-            # 使用解码后的显示名称作为本地文件名
-            local_path = os.path.join(download_dir, display)
-            print(f"准备下载: {display} ({size} bytes)")
-            
-            if ftp_download_and_delete(encoded, local_path, "files"):
-                success += 1
-                print(f"下载成功: {display}")
-            else:
-                fail += 1
-                print(f"下载失败: {display}")
-        
-        msg = f"下载完成: {success} 成功" + (f", {fail} 失败" if fail else "")
-        self.app_ref.show_message(msg + chr(10) + f"保存到: {download_dir}")
-        self.app_ref.update_status(msg)
-        
-        # 刷新服务器列表
-        self.refresh_server()
-
-
 class MainLayout(BoxLayout):
     def __init__(self, app, **kwargs):
         super().__init__(**kwargs)
@@ -1015,9 +671,6 @@ class MainLayout(BoxLayout):
         plus.bind(on_press=lambda *a: self.add_text_tab())
         self.tab_bar.add_widget(plus)
 
-    def on_touch_move(self, touch):
-        return super().on_touch_move(touch)
-
     def _on_tab_press(self, index, instance):
         if self.drag_tab_btn:
             return
@@ -1092,15 +745,6 @@ class MainLayout(BoxLayout):
         self.show_tab(len(self.tabs) - 1)
         self.update_status(f"新建: {title}")
 
-    def add_transfer_tab(self):
-        for t in self.tabs:
-            if t["type"] == "transfer":
-                self.show_tab(self.tabs.index(t))
-                return
-        widget = TransferTab(app_ref=self.app)
-        self.tabs.append({"title": "传输", "type": "transfer", "widget": widget, "btn": None})
-        self.show_tab(len(self.tabs) - 1)
-
     def close_tab(self, index):
         if index < 0 or index >= len(self.tabs):
             return
@@ -1162,7 +806,6 @@ class MainLayout(BoxLayout):
         content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
         items = [
             ("新建文本标签", self.add_text_tab),
-            ("新建/打开传输页", self.add_transfer_tab),
             ("重命名当前标签", self.rename_current_tab),
             ("关闭当前标签", lambda: self.close_tab(self.current_index)),
             ("立即保存", self.app.save_data),
@@ -1668,13 +1311,10 @@ class MiniNoteApp(App):
             self.editor_font_size = data["editor_font_size"]
         self.preserved_tabs = []
         text_tabs = []
-        has_transfer = False
         for tab in data.get("tabs", []):
             t = tab.get("type")
             if t == "text":
                 text_tabs.append(tab)
-            elif t == "transfer":
-                has_transfer = True
             else:
                 self.preserved_tabs.append(copy.deepcopy(tab))
         self.other_data = {
@@ -1682,12 +1322,6 @@ class MiniNoteApp(App):
             for k, v in data.items()
             if k not in ("tabs", "username", "editor_font_size")
         }
-        transfer_widget = None
-        if self.main_layout:
-            for t in self.main_layout.tabs:
-                if t["type"] == "transfer":
-                    transfer_widget = t["widget"]
-                    break
         if self.main_layout:
             self.main_layout.tabs.clear()
             self.main_layout.editor_counter = 1
@@ -1703,19 +1337,14 @@ class MiniNoteApp(App):
                     )
             else:
                 self.main_layout.add_text_tab()
-            if has_transfer or transfer_widget is not None:
-                self.main_layout.add_transfer_tab()
             self.main_layout.update_all_editor_font_size(self.editor_font_size)
-            for i, t in enumerate(self.main_layout.tabs):
-                if t["type"] == "text":
-                    self.main_layout.show_tab(i)
-                    break
+            if self.main_layout.tabs:
+                self.main_layout.show_tab(0)
 
     def _create_new_note(self):
         self.main_layout.tabs.clear()
         self.main_layout.editor_counter = 1
         self.main_layout.add_text_tab()
-        self.main_layout.add_transfer_tab()
         self.main_layout.show_tab(0)
         self.preserved_tabs = []
         self.other_data = {}
@@ -1743,12 +1372,6 @@ class MiniNoteApp(App):
                         "content": tab["widget"].get_content(),
                         "font_size": tab["widget"].font_size,
                         "readonly": tab["widget"].readonly,
-                    })
-                elif tab["type"] == "transfer":
-                    tabs.append({
-                        "type": "transfer",
-                        "title": tab["title"],
-                        "content": "",
                     })
         data = copy.deepcopy(self.other_data)
         data["username"] = self.username
