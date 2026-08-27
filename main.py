@@ -211,6 +211,7 @@ def ftp_upload_file(local_path, remote_dir="files"):
 
 
 def ftp_list_files(remote_dir="files"):
+    """获取FTP服务器文件列表 - 使用电脑版稳定实现"""
     ftp = None
     try:
         ftp = get_ftp()
@@ -225,12 +226,16 @@ def ftp_list_files(remote_dir="files"):
                 name = " ".join(parts[8:])
                 if name in (".", ".."):
                     return
-                size = int(parts[4])
+                try:
+                    size = int(parts[4])
+                except (ValueError, IndexError):
+                    size = 0
                 try:
                     display_name = urllib.parse.unquote(name)
                 except Exception:
                     display_name = name
                 files.append((name, display_name, size))
+                print(f"发现文件: {display_name} ({size} bytes)")
 
         ftp.retrlines("LIST", parse_line)
         return files
@@ -246,14 +251,11 @@ def ftp_list_files(remote_dir="files"):
 
 
 def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
-    """下载FTP文件并删除（移动操作）"""
+    """下载FTP文件并删除（移动操作）- 使用电脑版稳定实现"""
     ftp = None
     try:
         ftp = get_ftp()
         ftp.cwd(remote_dir)
-        
-        # 尝试下载文件
-        print(f"正在下载: {remote_name} -> {local_path}")
         
         # 确保本地目录存在
         local_dir = os.path.dirname(local_path)
@@ -265,11 +267,19 @@ def ftp_download_and_delete(remote_name, local_path, remote_dir="files"):
                 print(f"创建目录失败: {e}")
                 return False
         
-        # 下载文件
+        # 直接下载，不预先检查文件是否存在
+        print(f"正在下载: {remote_name} -> {local_path}")
         with open(local_path, "wb") as f:
             ftp.retrbinary(f"RETR {remote_name}", f.write)
         
         print(f"下载成功: {remote_name}")
+        
+        # 验证下载的文件大小
+        if os.path.exists(local_path):
+            downloaded_size = os.path.getsize(local_path)
+            print(f"下载大小: {downloaded_size} bytes")
+            if downloaded_size == 0:
+                print(f"警告: 下载的文件大小为0")
         
         # 删除远程文件
         try:
